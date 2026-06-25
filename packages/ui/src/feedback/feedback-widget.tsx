@@ -1,0 +1,203 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
+import { FeedbackComposer } from "./feedback-composer";
+import { useScreenRecorder } from "./use-screen-recorder";
+import { uploadToVimeoTus } from "./upload-video";
+
+const PANEL_WIDTH = 460;
+const PILL_WIDTH = 260;
+type Mode = "write" | "video";
+
+function mmss(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function FeedbackWidget() {
+  const { isOpen, close, config } = useFeedback();
+  const { transport } = config;
+  const enableVideo = config.enableVideo ?? true;
+  const enableRichText = config.enableRichText ?? true;
+  const z = config.zIndex ?? 2147483000;
+
+  const [mounted, setMounted] = useState(false);
+  const [mode, setMode] = useState<Mode>("write");
+  const [type, setType] = useState<FeedbackType>("bug");
+  const [subject, setSubject] = useState("");
+  const [bodyHtml, setBodyHtml] = useState("");
+  const [plainBody, setPlainBody] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [result, setResult] = useState<FeedbackSubmitResult | null>(null);
+  const [composerKey, setComposerKey] = useState(0);
+
+  const recorder = useScreenRecorder();
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const drag = useRef<{ dx: number; dy: number } | null>(null);
+  const widthRef = useRef<number>(PANEL_WIDTH);
+
+  useEffect(() => setMounted(true), []);
+  const isPill = mode === "video" && recorder.status === "recording";
+
+  useEffect(() => {
+    if (isOpen && !pos) setPos({ left: Math.max(16, window.innerWidth - PANEL_WIDTH - 24), top: Math.max(16, Math.round(window.innerHeight * 0.12)) });
+  }, [isOpen, pos]);
+
+  const onMove = useCallback((e: MouseEvent) => {
+    if (!drag.current) return;
+    const w = widthRef.current;
+    setPos({ left: Math.min(Math.max(8, e.clientX - drag.current.dx), window.innerWidth - w - 8), top: Math.min(Math.max(8, e.clientY - drag.current.dy), window.innerHeight - 80) });
+  }, []);
+  const onUp = useCallback(() => { drag.current = null; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }, [onMove]);
+  const onDown = useCallback((e: React.MouseEvent) => {
+    if (!pos) return;
+    drag.current = { dx: e.clientX - pos.left, dy: e.clientY - pos.top };
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  }, [pos, onMove, onUp]);
+  useEffect(() => () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }, [onMove, onUp]);
+
+  function resetForm() { setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); recorder.reset(); }
+  function handleClose() { resetForm(); setMode("write"); close(); }
+  function switchMode(next: Mode) {
+    if (recorder.status === "recording") return;
+    if (next === "write") recorder.reset();
+    setResult(null); setMode(next);
+  }
+
+  const autoContext = (): FeedbackContextMeta => ({
+    pageUrl: window.location.href, pageTitle: document.title, userAgent: navigator.userAgent, viewport: `${window.innerWidth}x${window.innerHeight}`,
+  });
+
+  function currentBodyHtml(): string {
+    if (enableRichText) return bodyHtml;
+    const t = plainBody.trim();
+    return t ? `<p>${t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>` : "";
+  }
+
+  async function handleSubmitText() {
+    if (!subject.trim() || submitting) return;
+    setSubmitting(true); setResult(null);
+    try {
+      const res = await transport.submitText({ type, subject: subject.trim(), bodyHtml: currentBodyHtml(), ...autoContext() });
+      setResult(res);
+      if (res.ok) { setSubject(""); setBodyHtml(""); setPlainBody(""); setComposerKey((k) => k + 1); }
+    } catch (err) {
+      setResult({ ok: false, error: (err as Error).message });
+    } finally { setSubmitting(false); }
+  }
+
+  async function handleSubmitVideo() {
+    if (!subject.trim() || !recorder.blob || submitting) return;
+    setSubmitting(true); setResult(null); setUploadProgress(0);
+    try {
+      const target = await transport.createVideoTarget(recorder.blob.size, subject.trim());
+      await uploadToVimeoTus(target.uploadLink, recorder.blob, (f) => setUploadProgress(f));
+      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, ...autoContext() });
+      setResult(res);
+      if (res.ok) { recorder.reset(); setSubject(""); }
+    } catch (err) {
+      setResult({ ok: false, error: `Video feedback failed: ${(err as Error).message}` });
+    } finally { setSubmitting(false); setUploadProgress(null); }
+  }
+
+  if (!mounted || !isOpen || !pos) return null;
+
+  if (isPill) {
+    widthRef.current = PILL_WIDTH;
+    return createPortal(
+      <div className="mvui-fb-pill" style={{ top: pos.top, left: pos.left, width: PILL_WIDTH, zIndex: z }}>
+        <span className="mvui-fb-pill-grip" onMouseDown={onDown} title="Drag">⠿</span>
+        <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
+        <span className="mvui-fb-pill-label">recording…</span>
+        <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
+      </div>,
+      document.body,
+    );
+  }
+
+  const panelWidth = Math.min(PANEL_WIDTH, window.innerWidth - 32);
+  widthRef.current = panelWidth;
+  const sendDisabled = submitting || !subject.trim() || (mode === "video" && recorder.status !== "recorded");
+
+  return createPortal(
+    <div className="mvui-fb-panel" role="dialog" aria-label="Send feedback" style={{ top: pos.top, left: pos.left, width: panelWidth, zIndex: z }}>
+      <div className="mvui-fb-bar" onMouseDown={onDown}>
+        <span className="mvui-fb-bar-title">Send feedback</span>
+        <button type="button" className="mvui-fb-x" aria-label="Close" onClick={handleClose}>×</button>
+      </div>
+      <div className="mvui-fb-body">
+        {result?.ok ? (
+          <div className="mvui-fb-ok">
+            <p>Thanks — your feedback was filed.</p>
+            {result.url && <a href={result.url} target="_blank" rel="noreferrer">View the Teamwork task →</a>}
+            <div className="mvui-fb-actions">
+              <button type="button" className="mvui-fb-send" onClick={() => setResult(null)}>Send another</button>
+              <button type="button" className="mvui-fb-cancel" onClick={handleClose}>Done</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="mvui-fb-types">
+              {FEEDBACK_TYPES.map((t) => (
+                <button key={t.value} type="button" className="mvui-fb-type" data-active={type === t.value} onClick={() => setType(t.value)}>{t.label}</button>
+              ))}
+            </div>
+
+            {enableVideo && (
+              <div className="mvui-fb-modes">
+                {(["write", "video"] as Mode[]).map((m) => (
+                  <button key={m} type="button" className="mvui-fb-mode" data-active={mode === m} onClick={() => switchMode(m)}>{m === "write" ? "Write" : "Record video"}</button>
+                ))}
+              </div>
+            )}
+
+            <input className="mvui-fb-input" type="text" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="One-line summary" />
+
+            {mode === "write" ? (
+              enableRichText ? (
+                <FeedbackComposer key={composerKey} uploadImage={transport.uploadImage} onChange={(html) => setBodyHtml(html)} />
+              ) : (
+                <textarea className="mvui-fb-textarea" value={plainBody} onChange={(e) => setPlainBody(e.target.value)} placeholder="What happened? What did you expect?" />
+              )
+            ) : (
+              <VideoPane recorder={recorder} uploadProgress={uploadProgress} submitting={submitting} />
+            )}
+
+            {result && !result.ok && <p className="mvui-fb-err">{result.error}</p>}
+
+            <div className="mvui-fb-actions">
+              <button type="button" className="mvui-fb-cancel" onClick={handleClose}>Cancel</button>
+              <button type="button" className="mvui-fb-send" disabled={sendDisabled} onClick={mode === "write" ? handleSubmitText : handleSubmitVideo}>
+                {submitting ? (uploadProgress !== null ? `Uploading… ${Math.round(uploadProgress * 100)}%` : "Sending…") : "Send feedback"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnType<typeof useScreenRecorder>; uploadProgress: number | null; submitting: boolean; }) {
+  if (recorder.status === "recorded" && recorder.previewUrl) {
+    return (
+      <div className="mvui-fb-video-preview">
+        <video src={recorder.previewUrl} controls className="mvui-fb-video" />
+        <div className="mvui-fb-video-row">
+          <button type="button" className="mvui-fb-link" onClick={recorder.reset} disabled={submitting}>↺ Re-record</button>
+          {uploadProgress !== null && <span className="mvui-fb-hint">Uploading to Vimeo… {Math.round(uploadProgress * 100)}%</span>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="mvui-fb-video-idle">
+      <button type="button" className="mvui-fb-send" onClick={recorder.start}>⏺ Start recording</button>
+      <p className="mvui-fb-hint">Captures a tab/window + your mic. The widget shrinks to a small pill while recording; click Stop when done.</p>
+      {recorder.error && <p className="mvui-fb-err">{recorder.error}</p>}
+    </div>
+  );
+}

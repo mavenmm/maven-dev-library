@@ -1,4 +1,64 @@
-/* @mavenmm/ui — self-contained, scoped component styles.
-   Convention: every class is prefixed `mvui-`; NO global/reset rules (so the
-   stylesheet never fights a host app's CSS or Tailwind). Component styles land
-   here as components are built. */
+/* @mavenmm/ui feedback widget — self-contained, scoped styles.
+   Every selector is under an .mvui-fb-* class; NO element/global resets, so the
+   sheet never fights a host app's CSS or Tailwind (any version). */
+
+.mvui-fb-launcher { display:inline-flex; align-items:center; gap:6px; border:0; background:transparent; cursor:pointer; font:inherit; font-size:14px; padding:6px 10px; border-radius:6px; color:inherit; }
+.mvui-fb-launcher:hover { background:rgba(0,0,0,0.06); }
+.mvui-fb-launcher-icon { width:16px; height:16px; }
+
+.mvui-fb-panel { position:fixed; display:flex; flex-direction:column; background:#fff; color:#0f172a; border:1px solid #e2e8f0; border-radius:8px; box-shadow:0 10px 40px rgba(0,0,0,0.25); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; font-size:14px; box-sizing:border-box; }
+.mvui-fb-panel * { box-sizing:border-box; }
+.mvui-fb-bar { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:#e2e8f0; border-bottom:1px solid #cbd5e1; border-radius:8px 8px 0 0; cursor:move; user-select:none; }
+.mvui-fb-bar-title { font-size:14px; font-weight:600; }
+.mvui-fb-x { border:0; background:transparent; font-size:18px; line-height:1; color:#64748b; cursor:pointer; padding:0 4px; }
+.mvui-fb-x:hover { color:#1e293b; }
+.mvui-fb-body { display:flex; flex-direction:column; gap:12px; padding:12px; }
+
+.mvui-fb-types { display:flex; flex-wrap:wrap; gap:6px; }
+.mvui-fb-type { border:0; border-radius:6px; padding:4px 10px; font:inherit; font-size:12px; font-weight:500; cursor:pointer; background:#f1f5f9; color:#475569; }
+.mvui-fb-type:hover { background:#e2e8f0; }
+.mvui-fb-type[data-active="true"] { background:#1e293b; color:#fff; }
+
+.mvui-fb-modes { display:inline-flex; width:max-content; border:1px solid #e2e8f0; border-radius:6px; padding:2px; }
+.mvui-fb-mode { border:0; background:transparent; border-radius:4px; padding:4px 12px; font:inherit; font-size:12px; font-weight:500; color:#475569; cursor:pointer; }
+.mvui-fb-mode[data-active="true"] { background:#1e293b; color:#fff; }
+
+.mvui-fb-input { width:100%; border:1px solid #cbd5e1; border-radius:4px; padding:6px 8px; font:inherit; font-size:14px; color:#0f172a; background:#fff; }
+.mvui-fb-input:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
+.mvui-fb-textarea { width:100%; min-height:120px; resize:vertical; border:1px solid #cbd5e1; border-radius:4px; padding:6px 8px; font:inherit; font-size:14px; color:#0f172a; background:#fff; }
+.mvui-fb-textarea:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
+
+.mvui-fb-composer { border:1px solid #cbd5e1; border-radius:4px; padding:6px 8px; background:#fff; min-height:11rem; max-height:48vh; overflow-y:auto; }
+.mvui-fb-prose { outline:none; font-size:14px; color:#0f172a; }
+.mvui-fb-prose p { margin:0 0 0.5em; }
+.mvui-fb-prose img { max-width:100%; height:auto; border-radius:4px; }
+.mvui-fb-prose p.is-editor-empty:first-child::before { content:attr(data-placeholder); color:#94a3b8; float:left; height:0; pointer-events:none; }
+.mvui-fb-composer-tools { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.mvui-fb-link { border:0; background:transparent; padding:0; font:inherit; font-size:12px; font-weight:500; color:#2563eb; cursor:pointer; }
+.mvui-fb-link:hover { color:#1d4ed8; }
+.mvui-fb-link:disabled { color:#94a3b8; cursor:default; }
+.mvui-fb-hint { font-size:12px; color:#94a3b8; }
+
+.mvui-fb-video-idle { border:1px dashed #93c5fd; background:#eff6ff; border-radius:8px; padding:24px 16px; text-align:center; }
+.mvui-fb-video-idle .mvui-fb-hint { display:block; margin-top:8px; }
+.mvui-fb-video-preview { display:flex; flex-direction:column; gap:8px; }
+.mvui-fb-video { max-height:18rem; width:100%; border:1px solid #cbd5e1; border-radius:4px; background:#000; }
+.mvui-fb-video-row { display:flex; align-items:center; gap:12px; }
+
+.mvui-fb-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-top:4px; }
+.mvui-fb-cancel { border:0; background:transparent; color:#64748b; font:inherit; font-size:14px; padding:8px 12px; cursor:pointer; }
+.mvui-fb-cancel:hover { color:#334155; }
+.mvui-fb-send { border:0; border-radius:6px; background:#2563eb; color:#fff; font:inherit; font-size:14px; font-weight:500; padding:8px 16px; cursor:pointer; }
+.mvui-fb-send:hover { background:#1d4ed8; }
+.mvui-fb-send:disabled { background:#cbd5e1; cursor:not-allowed; }
+
+.mvui-fb-ok { border:1px solid #a7f3d0; background:#ecfdf5; color:#065f46; border-radius:6px; padding:12px; font-size:14px; }
+.mvui-fb-ok a { display:inline-block; margin-top:4px; font-size:12px; font-weight:500; color:#047857; }
+.mvui-fb-err { border:1px solid #fecaca; background:#fef2f2; color:#b91c1c; border-radius:6px; padding:8px 12px; font-size:12px; margin:0; }
+
+.mvui-fb-pill { position:fixed; display:flex; align-items:center; gap:8px; border:1px solid #334155; background:#0f172a; padding:8px 12px; border-radius:9999px; box-shadow:0 8px 30px rgba(0,0,0,0.45),0 0 22px rgba(244,63,94,0.6); }
+.mvui-fb-pill-grip { cursor:move; user-select:none; padding:0 4px; color:#64748b; }
+.mvui-fb-pill-time { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:600; color:#fb7185; }
+.mvui-fb-pill-dot { width:10px; height:10px; border-radius:9999px; background:#f43f5e; }
+.mvui-fb-pill-label { font-size:12px; color:#94a3b8; }
+.mvui-fb-pill-stop { margin-left:auto; border:0; border-radius:6px; background:#e11d48; color:#fff; font:inherit; font-size:14px; padding:4px 12px; cursor:pointer; }

@@ -1,7 +1,7 @@
 {
   "name": "@mavenmm/ui",
-  "version": "0.0.1",
-  "description": "Maven dev-library — React frontend components + scoped CSS.",
+  "version": "0.1.0",
+  "description": "Maven dev-library — React frontend components + scoped CSS. First component: feedback widget.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -12,12 +12,31 @@
   },
   "files": ["dist"],
   "publishConfig": { "registry": "https://npm.pkg.github.com" },
-  "peerDependencies": { "react": ">=18 <20", "react-dom": ">=18 <20" },
+  "dependencies": {
+    "tus-js-client": "^4.3.1"
+  },
+  "peerDependencies": {
+    "react": ">=18 <20",
+    "react-dom": ">=18 <20",
+    "@tiptap/react": "^3",
+    "@tiptap/pm": "^3",
+    "@tiptap/starter-kit": "^3",
+    "@tiptap/extension-image": "^3",
+    "@tiptap/extension-placeholder": "^3"
+  },
   "devDependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0"
+    "@types/react-dom": "^19.0.0",
+    "@tiptap/react": "^3.13.0",
+    "@tiptap/pm": "^3.13.0",
+    "@tiptap/starter-kit": "^3.13.0",
+    "@tiptap/extension-image": "^3.13.0",
+    "@tiptap/extension-placeholder": "^3.13.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/dom": "^10.4.0",
+    "jsdom": "^25.0.1"
   },
   "scripts": { "build": "tsup && cp src/styles.css dist/styles.css" }
 }
