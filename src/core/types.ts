@@ -56,3 +56,27 @@ export interface CreateTextFeedbackInput {
 export type CreateFeedbackResult =
   | { ok: true; taskId: string; url: string }
   | { ok: false; error: string };
+
+// ─── Video path ──────────────────────────────────────────────────────────────
+export interface VideoUploadTarget { videoId: string; videoUri: string; uploadLink: string; }
+
+export interface SubmitVideoInput {
+  type: FeedbackType;
+  subject: string;
+  videoId: string;
+  videoUri: string;
+  pageUrl: string;
+  pageTitle?: string;
+  userAgent?: string;
+  viewport?: string;
+}
+
+/** Descriptor the host/poller persists so the transcript can be summarized later. */
+export interface PendingVideo { taskId: string; videoId: string; videoUri?: string; }
+
+export interface SubmitVideoResult { result: CreateFeedbackResult; pending?: PendingVideo; }
+
+export type SummaryOutcome =
+  | { status: "summarized" }
+  | { status: "retry" }            // transcript not ready yet — try again later
+  | { status: "failed"; error: string };

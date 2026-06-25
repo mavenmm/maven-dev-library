@@ -4,3 +4,6 @@ export * from "./types";
 export * from "./compose";
 export * from "./teamwork";
 export * from "./create-text-feedback";
+export * from "./vimeo";
+export * from "./summary";
+export * from "./create-video-feedback";
