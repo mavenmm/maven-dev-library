@@ -1,5 +1,5 @@
 // @mavenmm/dev-library/core — framework-neutral backend logic for Maven feedback.
-export const CORE_VERSION = "0.2.0";
+export const CORE_VERSION = "0.2.1";
 export * from "./types";
 export * from "./compose";
 export * from "./teamwork";

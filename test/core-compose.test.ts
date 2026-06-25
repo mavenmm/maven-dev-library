@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { escapeHtml, easternDatePrefix, buildTitle, buildContextHtml, titlePrefixFor, CORE_VERSION } from "../src/core/index";
 
 describe("core compose", () => {
-  it("exposes a version", () => { expect(CORE_VERSION).toBe("0.2.0"); });
+  it("exposes a version", () => { expect(CORE_VERSION).toBe("0.2.1"); });
   it("escapes the dangerous five", () => {
     expect(escapeHtml(`<a href="x">&'`)).toBe("&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
   });

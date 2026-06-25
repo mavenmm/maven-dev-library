@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
-import { FeedbackComposer } from "./feedback-composer";
+const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
 import { uploadToVimeoTus } from "./upload-video";
 
@@ -157,7 +157,9 @@ export function FeedbackWidget() {
 
             {mode === "write" ? (
               enableRichText ? (
-                <FeedbackComposer key={composerKey} uploadImage={transport.uploadImage} onChange={(html) => setBodyHtml(html)} />
+                <Suspense fallback={<p className="mvui-fb-hint">Loading editor…</p>}>
+                  <FeedbackComposer key={composerKey} uploadImage={transport.uploadImage} onChange={(html) => setBodyHtml(html)} />
+                </Suspense>
               ) : (
                 <textarea className="mvui-fb-textarea" value={plainBody} onChange={(e) => setPlainBody(e.target.value)} placeholder="What happened? What did you expect?" />
               )
