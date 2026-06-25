@@ -1,0 +1,4 @@
+/* @mavenmm/ui — self-contained, scoped component styles.
+   Convention: every class is prefixed `mvui-`; NO global/reset rules (so the
+   stylesheet never fights a host app's CSS or Tailwind). Component styles land
+   here as components are built. */

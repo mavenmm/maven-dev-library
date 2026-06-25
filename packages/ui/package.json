@@ -1,0 +1,23 @@
+{
+  "name": "@mavenmm/ui",
+  "version": "0.0.1",
+  "description": "Maven dev-library — React frontend components + scoped CSS.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "require": "./dist/index.cjs" },
+    "./styles.css": "./dist/styles.css"
+  },
+  "files": ["dist"],
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "peerDependencies": { "react": ">=18 <20", "react-dom": ">=18 <20" },
+  "devDependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  },
+  "scripts": { "build": "tsup && cp src/styles.css dist/styles.css" }
+}
