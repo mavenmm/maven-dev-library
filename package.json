@@ -1,18 +1,58 @@
 {
-  "name": "maven-dev-library",
-  "private": true,
-  "version": "0.0.0",
-  "description": "Maven shared dev-component library — shadcn-style shelf of reusable UI (@mavenmm/ui) + backend logic (@mavenmm/core).",
-  "workspaces": ["packages/*"],
+  "name": "@mavenmm/dev-library",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Maven's private shared dev-component library (SSOT). Consumed by Maven apps via git dependency — never published. Subpaths: /core (backend logic), /ui (React components).",
+  "type": "module",
+  "exports": {
+    "./core": { "types": "./dist/core.d.ts", "import": "./dist/core.js", "require": "./dist/core.cjs" },
+    "./ui": { "types": "./dist/ui.d.ts", "import": "./dist/ui.js", "require": "./dist/ui.cjs" },
+    "./ui/styles.css": "./dist/styles.css"
+  },
+  "files": ["dist", "src"],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "tsup && cp src/ui/styles.css dist/styles.css",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p packages/core/tsconfig.json && tsc -p packages/ui/tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "tus-js-client": "^4.3.1"
+  },
+  "peerDependencies": {
+    "react": ">=18 <20",
+    "react-dom": ">=18 <20",
+    "@tiptap/react": "^3",
+    "@tiptap/pm": "^3",
+    "@tiptap/starter-kit": "^3",
+    "@tiptap/extension-image": "^3",
+    "@tiptap/extension-placeholder": "^3"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true },
+    "@tiptap/react": { "optional": true },
+    "@tiptap/pm": { "optional": true },
+    "@tiptap/starter-kit": { "optional": true },
+    "@tiptap/extension-image": { "optional": true },
+    "@tiptap/extension-placeholder": { "optional": true }
   },
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@tiptap/react": "^3.13.0",
+    "@tiptap/pm": "^3.13.0",
+    "@tiptap/starter-kit": "^3.13.0",
+    "@tiptap/extension-image": "^3.13.0",
+    "@tiptap/extension-placeholder": "^3.13.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/dom": "^10.4.0",
+    "jsdom": "^25.0.1"
   }
 }

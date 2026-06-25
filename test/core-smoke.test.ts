@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CORE_VERSION, ping } from "../src/index";
+import { CORE_VERSION, ping } from "../src/core/index";
 
 describe("@mavenmm/core scaffold", () => {
   it("exposes a version", () => {

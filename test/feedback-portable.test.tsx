@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/re
 import {
   FeedbackProvider, FeedbackLauncher, FeedbackWidget,
   type FeedbackTransport, type TextFeedbackPayload,
-} from "../src/index";
+} from "../src/ui/index";
 
 // A mock transport proves the widget is fully backend-agnostic: it renders and
 // operates outside ANY app, with no S3/Vimeo/Teamwork — just an injected object.
