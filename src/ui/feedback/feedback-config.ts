@@ -61,6 +61,10 @@ export interface UiFeedbackConfig {
   enableVideo?: boolean;
   /** Use the rich-text composer + inline screenshots (needs S3). Default true. */
   enableRichText?: boolean;
+  /** While recording, collapse the modal to a small draggable pill (default true,
+   *  matches copydeck). Set false to keep the full panel up with inline recording
+   *  controls (the panel will then appear in same-surface captures). */
+  collapseWhileRecording?: boolean;
 }
 
 interface FeedbackState { isOpen: boolean; open: () => void; close: () => void; config: UiFeedbackConfig; }

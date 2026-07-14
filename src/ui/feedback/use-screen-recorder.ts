@@ -36,7 +36,11 @@ export function useScreenRecorder() {
   const start = useCallback(async () => {
     setError(null);
     try {
-      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+      // Chrome hides the *current* tab from the picker by default (selfBrowserSurface:"exclude").
+      // "include" re-adds it as an option (doesn't force it). Cast: not every TS DOM lib types this field yet.
+      const display = await navigator.mediaDevices.getDisplayMedia(
+        { video: true, audio: true, selfBrowserSurface: "include" } as unknown as DisplayMediaStreamOptions,
+      );
       let mic: MediaStream | null = null;
       try { mic = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { /* mic optional */ }
       streamsRef.current = mic ? [display, mic] : [display];
