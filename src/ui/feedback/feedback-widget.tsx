@@ -5,7 +5,7 @@ const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
 import { uploadToVimeoTus } from "./upload-video";
 
-const PANEL_WIDTH = 460;
+const PANEL_WIDTH = 1020; // matches copydeck; clamped to viewport−32 below
 const PILL_WIDTH = 260;
 type Mode = "write" | "video";
 
@@ -20,6 +20,7 @@ export function FeedbackWidget() {
   const { transport } = config;
   const enableVideo = config.enableVideo ?? true;
   const enableRichText = config.enableRichText ?? true;
+  const collapseWhileRecording = config.collapseWhileRecording ?? true;
   const z = config.zIndex ?? 2147483000;
 
   const [mounted, setMounted] = useState(false);
@@ -39,7 +40,7 @@ export function FeedbackWidget() {
   const widthRef = useRef<number>(PANEL_WIDTH);
 
   useEffect(() => setMounted(true), []);
-  const isPill = mode === "video" && recorder.status === "recording";
+  const isPill = mode === "video" && recorder.status === "recording" && collapseWhileRecording;
 
   useEffect(() => {
     if (isOpen && !pos) setPos({ left: Math.max(16, window.innerWidth - PANEL_WIDTH - 24), top: Math.max(16, Math.round(window.innerHeight * 0.12)) });
@@ -184,6 +185,16 @@ export function FeedbackWidget() {
 }
 
 function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnType<typeof useScreenRecorder>; uploadProgress: number | null; submitting: boolean; }) {
+  // Shown only when collapseWhileRecording=false (otherwise the panel is a pill while recording).
+  if (recorder.status === "recording") {
+    return (
+      <div className="mvui-fb-video-recording">
+        <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
+        <span className="mvui-fb-hint">Recording… drive the app, then click Stop.</span>
+        <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
+      </div>
+    );
+  }
   if (recorder.status === "recorded" && recorder.previewUrl) {
     return (
       <div className="mvui-fb-video-preview">
