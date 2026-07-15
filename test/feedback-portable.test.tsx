@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import {
   FeedbackProvider, FeedbackLauncher, FeedbackWidget,
   type FeedbackTransport, type TextFeedbackPayload,
@@ -9,6 +9,15 @@ import {
 // A mock transport proves the widget is fully backend-agnostic: it renders and
 // operates outside ANY app, with no S3/Vimeo/Teamwork — just an injected object.
 afterEach(cleanup);
+
+// The widget renders its modal into an isolated shadow root (host CSS can't leak in),
+// so modal content lives in the shadow tree — query THROUGH it, not via `screen`.
+// The launcher button stays in the light DOM.
+function panel() {
+  const host = document.querySelector("[data-mvui-feedback-root]");
+  if (!host || !host.shadowRoot) throw new Error("feedback shadow root not mounted");
+  return within(host.shadowRoot as unknown as HTMLElement);
+}
 
 function mockTransport(overrides: Partial<FeedbackTransport> = {}): FeedbackTransport {
   return {
@@ -32,17 +41,17 @@ function mount(transport: FeedbackTransport) {
 describe("feedback widget portability (mock transport, no backend)", () => {
   it("is closed until the launcher is clicked", () => {
     mount(mockTransport());
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(panel().queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByText("Feedback"));
-    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(panel().getByRole("dialog")).toBeTruthy();
   });
 
   it("disables Send with no subject, enables once typed", () => {
     mount(mockTransport());
     fireEvent.click(screen.getByText("Feedback"));
-    const send = screen.getByRole("button", { name: "Send feedback" }) as HTMLButtonElement;
+    const send = panel().getByRole("button", { name: "Send feedback" }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    fireEvent.change(screen.getByPlaceholderText("One-line summary"), { target: { value: "Broken link" } });
+    fireEvent.change(panel().getByPlaceholderText("One-line summary"), { target: { value: "Broken link" } });
     expect(send.disabled).toBe(false);
   });
 
@@ -50,10 +59,10 @@ describe("feedback widget portability (mock transport, no backend)", () => {
     const t = mockTransport();
     mount(t);
     fireEvent.click(screen.getByText("Feedback"));
-    fireEvent.click(screen.getByText("Feature request"));
-    fireEvent.change(screen.getByPlaceholderText("One-line summary"), { target: { value: "Add dark mode" } });
-    fireEvent.change(screen.getByPlaceholderText(/What happened/), { target: { value: "please" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+    fireEvent.click(panel().getByText("Feature request"));
+    fireEvent.change(panel().getByPlaceholderText("One-line summary"), { target: { value: "Add dark mode" } });
+    fireEvent.change(panel().getByPlaceholderText(/What happened/), { target: { value: "please" } });
+    fireEvent.click(panel().getByRole("button", { name: "Send feedback" }));
 
     await waitFor(() => expect(t.submitText).toHaveBeenCalledTimes(1));
     const payload = (t.submitText as any).mock.calls[0][0] as TextFeedbackPayload;
@@ -61,16 +70,16 @@ describe("feedback widget portability (mock transport, no backend)", () => {
     expect(payload.subject).toBe("Add dark mode");
     expect(payload.bodyHtml).toContain("please");
     expect(payload.pageUrl).toBeTruthy();
-    await waitFor(() => expect(screen.getByText(/your feedback was filed/i)).toBeTruthy());
-    expect((screen.getByText(/View the Teamwork task/i) as HTMLAnchorElement).href).toContain("/app/tasks/1");
+    await waitFor(() => expect(panel().getByText(/your feedback was filed/i)).toBeTruthy());
+    expect((panel().getByText(/View the Teamwork task/i) as HTMLAnchorElement).href).toContain("/app/tasks/1");
   });
 
   it("surfaces a transport error without crashing", async () => {
     const t = mockTransport({ submitText: vi.fn(async () => ({ ok: false, error: "Teamwork 403" })) });
     mount(t);
     fireEvent.click(screen.getByText("Feedback"));
-    fireEvent.change(screen.getByPlaceholderText("One-line summary"), { target: { value: "x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send feedback" }));
-    await waitFor(() => expect(screen.getByText("Teamwork 403")).toBeTruthy());
+    fireEvent.change(panel().getByPlaceholderText("One-line summary"), { target: { value: "x" } });
+    fireEvent.click(panel().getByRole("button", { name: "Send feedback" }));
+    await waitFor(() => expect(panel().getByText("Teamwork 403")).toBeTruthy());
   });
 });
