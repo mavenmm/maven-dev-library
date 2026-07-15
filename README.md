@@ -60,5 +60,6 @@ docs/       -> specs + implementation plans
 ```
 
 ## Docs
+- **Add the feedback widget to an app:** [`docs/feedback-integration.md`](docs/feedback-integration.md) — step-by-step, maven-home is the reference; next apps are Dashboard + Status.
 - Design spec: [`docs/specs/`](docs/specs)
 - Implementation plans: [`docs/plans/`](docs/plans)
