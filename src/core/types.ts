@@ -47,6 +47,8 @@ export interface CreateTextFeedbackInput {
   type: FeedbackType;
   subject: string;
   bodyHtml?: string;
+  /** Optional human-readable area/category (shown in the task), e.g. "Agentic feature". */
+  topicLabel?: string;
   pageUrl: string;
   pageTitle?: string;
   userAgent?: string;
@@ -65,6 +67,8 @@ export interface SubmitVideoInput {
   subject: string;
   videoId: string;
   videoUri: string;
+  /** Optional human-readable area/category (shown in the task), e.g. "Agentic feature". */
+  topicLabel?: string;
   pageUrl: string;
   pageTitle?: string;
   userAgent?: string;

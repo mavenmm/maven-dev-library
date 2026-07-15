@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
+import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackTopic, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
 const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
 import { uploadToVimeoTus } from "./upload-video";
@@ -23,6 +23,9 @@ export function FeedbackWidget() {
   const enableRichText = config.enableRichText ?? true;
   const collapseWhileRecording = config.collapseWhileRecording ?? true;
   const z = config.zIndex ?? 2147483000;
+  const topics = config.topics;
+  const needsTopic = !!(topics && topics.length);
+  const topicPrompt = config.topicPrompt ?? "What's this feedback about?";
 
   const [mounted, setMounted] = useState(false);
   const [shadowEl, setShadowEl] = useState<HTMLElement | null>(null);
@@ -35,6 +38,7 @@ export function FeedbackWidget() {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [result, setResult] = useState<FeedbackSubmitResult | null>(null);
   const [composerKey, setComposerKey] = useState(0);
+  const [topic, setTopic] = useState<FeedbackTopic | null>(null);
 
   const recorder = useScreenRecorder();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -81,7 +85,7 @@ export function FeedbackWidget() {
   }, [pos, onMove, onUp]);
   useEffect(() => () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }, [onMove, onUp]);
 
-  function resetForm() { setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); recorder.reset(); }
+  function resetForm() { setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); setTopic(null); recorder.reset(); }
   function handleClose() { resetForm(); setMode("write"); close(); }
   function switchMode(next: Mode) {
     if (recorder.status === "recording") return;
@@ -103,7 +107,7 @@ export function FeedbackWidget() {
     if (!subject.trim() || submitting) return;
     setSubmitting(true); setResult(null);
     try {
-      const res = await transport.submitText({ type, subject: subject.trim(), bodyHtml: currentBodyHtml(), ...autoContext() });
+      const res = await transport.submitText({ type, subject: subject.trim(), bodyHtml: currentBodyHtml(), topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
       setResult(res);
       if (res.ok) { setSubject(""); setBodyHtml(""); setPlainBody(""); setComposerKey((k) => k + 1); }
     } catch (err) {
@@ -117,7 +121,7 @@ export function FeedbackWidget() {
     try {
       const target = await transport.createVideoTarget(recorder.blob.size, subject.trim());
       await uploadToVimeoTus(target.uploadLink, recorder.blob, (f) => setUploadProgress(f));
-      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, ...autoContext() });
+      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
       setResult(res);
       if (res.ok) { recorder.reset(); setSubject(""); }
     } catch (err) {
@@ -160,8 +164,23 @@ export function FeedbackWidget() {
               <button type="button" className="mvui-fb-cancel" onClick={handleClose}>Done</button>
             </div>
           </div>
+        ) : needsTopic && !topic ? (
+          <div className="mvui-fb-topic-step">
+            <p className="mvui-fb-topic-prompt">{topicPrompt}</p>
+            <div className="mvui-fb-topics">
+              {topics!.map((t) => (
+                <button key={t.value} type="button" className="mvui-fb-topic-choice" onClick={() => setTopic(t)}>{t.label}</button>
+              ))}
+            </div>
+          </div>
         ) : (
           <>
+            {topic && (
+              <div className="mvui-fb-topic-crumb">
+                <span><strong>Area:</strong> {topic.label}</span>
+                <button type="button" className="mvui-fb-link" onClick={() => setTopic(null)}>change</button>
+              </div>
+            )}
             <div className="mvui-fb-types">
               {FEEDBACK_TYPES.map((t) => (
                 <button key={t.value} type="button" className="mvui-fb-type" data-active={type === t.value} onClick={() => setType(t.value)}>{t.label}</button>

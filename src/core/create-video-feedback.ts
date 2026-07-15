@@ -27,7 +27,7 @@ export async function submitVideoFeedback(cfg: FeedbackConfig, secrets: Secrets,
   const commentHtml =
     `<p>🎥 <strong>Screen recording:</strong> <a href="${escapeHtml(watch)}">${escapeHtml(watch)}</a></p>` +
     `<p>🤖 <em>AI summary pending — added automatically once the transcript is ready.</em></p>` +
-    buildContextHtml(submitter, { appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport });
+    buildContextHtml(submitter, { appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport, topicLabel: input.topicLabel });
 
   try {
     const taskId = await createFeedbackTaskInTeamwork(tw, token, buildTitle(input.type, subject));

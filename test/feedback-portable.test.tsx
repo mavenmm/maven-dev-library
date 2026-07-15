@@ -38,6 +38,18 @@ function mount(transport: FeedbackTransport) {
   );
 }
 
+function mountWithTopics(transport: FeedbackTransport) {
+  return render(
+    <FeedbackProvider config={{ transport, enableRichText: false, enableVideo: true, topics: [
+      { value: "general", label: "PAAB app (general)" },
+      { value: "agentic", label: "Agentic feature" },
+    ] }}>
+      <FeedbackLauncher />
+      <FeedbackWidget />
+    </FeedbackProvider>,
+  );
+}
+
 describe("feedback widget portability (mock transport, no backend)", () => {
   it("is closed until the launcher is clicked", () => {
     mount(mockTransport());
@@ -81,5 +93,22 @@ describe("feedback widget portability (mock transport, no backend)", () => {
     fireEvent.change(panel().getByPlaceholderText("One-line summary"), { target: { value: "x" } });
     fireEvent.click(panel().getByRole("button", { name: "Send feedback" }));
     await waitFor(() => expect(panel().getByText("Teamwork 403")).toBeTruthy());
+  });
+
+  it("gates the form behind a topic step and attaches the chosen topic", async () => {
+    const t = mockTransport();
+    mountWithTopics(t);
+    fireEvent.click(screen.getByText("Feedback"));
+    // The topic step comes first — the form is not shown yet.
+    expect(panel().queryByPlaceholderText("One-line summary")).toBeNull();
+    expect(panel().getByText("What's this feedback about?")).toBeTruthy();
+    fireEvent.click(panel().getByText("Agentic feature"));
+    // Now the form is reachable.
+    fireEvent.change(panel().getByPlaceholderText("One-line summary"), { target: { value: "It hangs" } });
+    fireEvent.click(panel().getByRole("button", { name: "Send feedback" }));
+    await waitFor(() => expect(t.submitText).toHaveBeenCalledTimes(1));
+    const payload = (t.submitText as any).mock.calls[0][0] as TextFeedbackPayload;
+    expect(payload.topic).toBe("agentic");
+    expect(payload.topicLabel).toBe("Agentic feature");
   });
 });
