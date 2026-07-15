@@ -12,7 +12,7 @@
 .mvui-fb-launcher--inverted:hover { background:rgba(255,255,255,0.14); }
 .mvui-fb-launcher-icon { width:18px; height:18px; }
 
-.mvui-fb-panel { position:fixed; display:flex; flex-direction:column; background:#fff; color:#0f172a; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); font-family:inherit; font-size:16px; box-sizing:border-box; }
+.mvui-fb-panel { position:fixed; display:flex; flex-direction:column; background:#fff; color:#0f172a; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.25); font-family:inherit; font-size:16px; box-sizing:border-box; text-align:left; }
 .mvui-fb-panel * { box-sizing:border-box; }
 .mvui-fb-bar { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; background:#e2e8f0; border-bottom:1px solid #cbd5e1; border-radius:10px 10px 0 0; cursor:move; user-select:none; }
 .mvui-fb-bar-title { font-size:16px; font-weight:600; }
@@ -30,10 +30,10 @@
 .mvui-fb-mode:hover:not([data-active="true"]) { background:#f1f5f9; }
 .mvui-fb-mode[data-active="true"] { background:#1e293b; color:#fff; }
 
-.mvui-fb-input { width:100%; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; }
+.mvui-fb-input { width:100%; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
 .mvui-fb-input::placeholder { color:#94a3b8; }
 .mvui-fb-input:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
-.mvui-fb-textarea { width:100%; min-height:176px; resize:vertical; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; }
+.mvui-fb-textarea { width:100%; min-height:176px; resize:vertical; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
 .mvui-fb-textarea::placeholder { color:#94a3b8; }
 .mvui-fb-textarea:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
 
