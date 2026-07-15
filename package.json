@@ -1,6 +1,6 @@
 {
   "name": "@mavenmm/dev-library",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "description": "Maven's private shared dev-component library (SSOT). Consumed by Maven apps via git dependency — never published. Subpaths: /core (backend logic), /ui (React components).",
   "type": "module",
@@ -8,6 +8,13 @@
     "./core": { "types": "./dist/core.d.ts", "import": "./dist/core.js", "require": "./dist/core.cjs" },
     "./ui": { "types": "./dist/ui.d.ts", "import": "./dist/ui.js", "require": "./dist/ui.cjs" },
     "./ui/styles.css": "./dist/styles.css"
+  },
+  "//typesVersions": "Subpath type resolution for consumers on classic moduleResolution 'node' (which ignores 'exports'). Complements the exports map above; type-only, no runtime effect.",
+  "typesVersions": {
+    "*": {
+      "core": ["dist/core.d.ts"],
+      "ui": ["dist/ui.d.ts"]
+    }
   },
   "files": ["dist", "src"],
   "scripts": {
