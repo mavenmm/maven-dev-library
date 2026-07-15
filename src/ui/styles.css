@@ -20,6 +20,13 @@
 .mvui-fb-x:hover { color:#1e293b; }
 .mvui-fb-body { display:flex; flex-direction:column; gap:16px; padding:16px; }
 
+.mvui-fb-topic-step { display:flex; flex-direction:column; gap:16px; padding:8px 0 4px; text-align:left; }
+.mvui-fb-topic-prompt { font-size:18px; font-weight:600; margin:0; color:#0f172a; }
+.mvui-fb-topics { display:flex; flex-wrap:wrap; gap:12px; }
+.mvui-fb-topic-choice { flex:1 1 180px; border:1px solid #cbd5e1; border-radius:10px; padding:20px 16px; font:inherit; font-size:15px; font-weight:600; color:#0f172a; background:#f8fafc; cursor:pointer; text-align:left; }
+.mvui-fb-topic-choice:hover { border-color:#3b82f6; background:#eff6ff; }
+.mvui-fb-topic-crumb { display:flex; align-items:center; gap:10px; font-size:13px; color:#475569; }
+
 .mvui-fb-types { display:flex; flex-wrap:wrap; gap:8px; }
 .mvui-fb-type { border:0; border-radius:6px; padding:6px 12px; font:inherit; font-size:14px; font-weight:500; cursor:pointer; background:#f1f5f9; color:#475569; }
 .mvui-fb-type:hover { background:#e2e8f0; }

@@ -24,7 +24,7 @@ export function buildTitle(type: FeedbackType, subject: string, now: Date = new 
 
 export function buildContextHtml(
   submitter: Submitter,
-  ctx: { appName: string; pageUrl: string; pageTitle?: string; userAgent?: string; viewport?: string },
+  ctx: { appName: string; pageUrl: string; pageTitle?: string; userAgent?: string; viewport?: string; topicLabel?: string },
 ): string {
   const who = submitter.name
     ? escapeHtml(submitter.name)
@@ -37,6 +37,7 @@ export function buildContextHtml(
     `<strong>Submitted by:</strong> ${who}${email}`,
     `<strong>App:</strong> ${escapeHtml(ctx.appName)}`,
   ];
+  if (ctx.topicLabel?.trim()) lines.push(`<strong>Area:</strong> ${escapeHtml(ctx.topicLabel.trim())}`);
   if (ctx.pageUrl) lines.push(`<strong>Page:</strong> <a href="${escapeHtml(ctx.pageUrl)}">${escapeHtml(pageLabel)}</a>`);
   const browser = [ctx.userAgent, ctx.viewport].filter(Boolean).map((b) => escapeHtml(b!));
   if (browser.length) lines.push(`<strong>Browser:</strong> ${browser.join(" · ")}`);

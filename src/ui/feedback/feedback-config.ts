@@ -10,6 +10,9 @@ export const FEEDBACK_TYPES: FeedbackTypeOption[] = [
   { value: "other", label: "Other" },
 ];
 
+/** An "area" the feedback is about (e.g. whole-app vs a specific feature). App-defined. */
+export interface FeedbackTopic { value: string; label: string; }
+
 /** Auto-captured page context attached to every submission. */
 export interface FeedbackContextMeta {
   pageUrl: string;
@@ -23,6 +26,9 @@ export interface TextFeedbackPayload extends FeedbackContextMeta {
   subject: string;
   /** Rich-text body HTML (inline screenshot <img> carry absolute public URLs). */
   bodyHtml: string;
+  /** Selected topic/area (only when the app configures `topics`). */
+  topic?: string;
+  topicLabel?: string;
 }
 
 export interface VideoFeedbackPayload extends FeedbackContextMeta {
@@ -30,6 +36,9 @@ export interface VideoFeedbackPayload extends FeedbackContextMeta {
   subject: string;
   videoId: string;
   videoUri: string;
+  /** Selected topic/area (only when the app configures `topics`). */
+  topic?: string;
+  topicLabel?: string;
 }
 
 /** Vimeo resumable-upload target minted server-side; browser tus-uploads to it. */
@@ -65,6 +74,11 @@ export interface UiFeedbackConfig {
    *  matches copydeck). Set false to keep the full panel up with inline recording
    *  controls (the panel will then appear in same-surface captures). */
   collapseWhileRecording?: boolean;
+  /** When set, the widget opens on a "what's this about?" step and the chosen
+   *  topic's label is attached to the filed task. Omit to skip the step entirely. */
+  topics?: FeedbackTopic[];
+  /** Prompt shown on the topic step (default "What's this feedback about?"). */
+  topicPrompt?: string;
 }
 
 interface FeedbackState { isOpen: boolean; open: () => void; close: () => void; config: UiFeedbackConfig; }

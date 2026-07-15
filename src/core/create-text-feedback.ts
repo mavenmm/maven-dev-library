@@ -21,7 +21,7 @@ export async function createTextFeedback(
   const title = buildTitle(input.type, subject);
   const body = (input.bodyHtml ?? "").trim() || "<p><em>(No description provided.)</em></p>";
   const commentHtml = body + buildContextHtml(submitter, {
-    appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport,
+    appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport, topicLabel: input.topicLabel,
   });
 
   try {
