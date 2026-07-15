@@ -4,6 +4,7 @@ import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackContextMet
 const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
 import { uploadToVimeoTus } from "./upload-video";
+import widgetCss from "../styles.css";
 
 const PANEL_WIDTH = 1020; // matches copydeck; clamped to viewport−32 below
 const PILL_WIDTH = 260;
@@ -24,6 +25,7 @@ export function FeedbackWidget() {
   const z = config.zIndex ?? 2147483000;
 
   const [mounted, setMounted] = useState(false);
+  const [shadowEl, setShadowEl] = useState<HTMLElement | null>(null);
   const [mode, setMode] = useState<Mode>("write");
   const [type, setType] = useState<FeedbackType>("bug");
   const [subject, setSubject] = useState("");
@@ -39,7 +41,27 @@ export function FeedbackWidget() {
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const widthRef = useRef<number>(PANEL_WIDTH);
 
-  useEffect(() => setMounted(true), []);
+  // Render into an isolated shadow root so the host app's CSS (e.g. Tailwind preflight styling bare
+  // <input>/<button>/<textarea> by element) cannot leak in. The widget's own stylesheet is injected
+  // into the shadow root. Inherited props (font-family, color) still flow from the host — intentional.
+  useEffect(() => {
+    const host = document.createElement("div");
+    host.setAttribute("data-mvui-feedback-root", "");
+    host.style.position = "fixed";
+    host.style.top = "0";
+    host.style.left = "0";
+    host.style.zIndex = String(z);
+    const root = host.attachShadow({ mode: "open" });
+    const styleEl = document.createElement("style");
+    styleEl.textContent = widgetCss;
+    root.appendChild(styleEl);
+    const container = document.createElement("div");
+    root.appendChild(container);
+    document.body.appendChild(host);
+    setShadowEl(container);
+    setMounted(true);
+    return () => { host.remove(); };
+  }, [z]);
   const isPill = mode === "video" && recorder.status === "recording" && collapseWhileRecording;
 
   useEffect(() => {
@@ -103,7 +125,7 @@ export function FeedbackWidget() {
     } finally { setSubmitting(false); setUploadProgress(null); }
   }
 
-  if (!mounted || !isOpen || !pos) return null;
+  if (!mounted || !isOpen || !pos || !shadowEl) return null;
 
   if (isPill) {
     widthRef.current = PILL_WIDTH;
@@ -114,7 +136,7 @@ export function FeedbackWidget() {
         <span className="mvui-fb-pill-label">recording…</span>
         <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
       </div>,
-      document.body,
+      shadowEl,
     );
   }
 
@@ -180,7 +202,7 @@ export function FeedbackWidget() {
         )}
       </div>
     </div>,
-    document.body,
+    shadowEl,
   );
 }
 
