@@ -20,25 +20,28 @@ consume it directly via **git dependency**.
 > npm error git@github.com: Permission denied (publickey).
 > ```
 
-**1. Add the dependency + the one-time `preinstall` script** to your app's `package.json`
-(the `preinstall` is what lets an install clone the private dep with a token — add it once):
+**1. Add the dependency** to your app's `package.json`:
 ```jsonc
 "dependencies": {
   "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.1"  // pin a tag (or a commit SHA)
-},
-"scripts": {
-  // Rewrites the git@github.com clone → https+token when GH_READ_TOKEN is set (CI); no-ops locally.
-  "preinstall": "if [ -n \"$GH_READ_TOKEN\" ]; then for b in \"git+ssh://git@github.com/\" \"ssh://git@github.com/\" \"git@github.com:\" \"https://github.com/\"; do git config --global url.\"https://$GH_READ_TOKEN@github.com/\".insteadOf \"$b\"; done; fi"
 }
 ```
 
 **2. Provide clone access:**
-- **Local dev:** either have SSH access to the `mavenmm` org (your GitHub SSH key added — most devs
-  already do), **or** `export GH_READ_TOKEN=<fine-grained PAT>` before `npm install` (the preinstall
-  then rewrites to HTTPS + token).
-- **CI (Netlify):** set `GH_READ_TOKEN` (a fine-grained PAT with read access to this repo) in the
-  site's **builds** scope — the `preinstall` does the rest. Netlify's `GIT_CONFIG_*` env vars do
-  **not** apply during the dependency-install stage, so the `preinstall` is required (not optional).
+- **Local dev:** clone over your own GitHub **SSH key** (most devs in the `mavenmm` org already have
+  one added) — the `github:` shorthand just works, nothing else to set up.
+- **CI (Netlify):** SSH is a dead end (the build bot has no SSH key for dependency repos), so
+  authenticate with a token over HTTPS. Set **two** env vars in the site's **builds** scope:
+
+  | Env var | Value |
+  |---|---|
+  | `GIT_CONFIG_PARAMETERS` | `'url.https://github.com/.insteadOf=ssh://git@github.com/' 'url.https://github.com/.insteadOf=git+ssh://git@github.com/' 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_READ_TOKEN}"; }; f'` |
+  | `GH_READ_TOKEN` | fine-grained PAT, **read** access to this repo |
+
+  git reads `GIT_CONFIG_PARAMETERS` on every call from process start, rewrites the `ssh://` clone to
+  `https://github.com/`, and a credential helper supplies the token **at clone time** — so no token
+  lands in config or the lockfile. A `preinstall` script does **not** work (it runs too late for
+  npm's clone; warm build cache hides this — verify with a **clear-cache** deploy).
 
 **3. Import:**
 ```ts

@@ -50,25 +50,49 @@ The library ships `typesVersions` (v0.3.1+) so classic-`node` consumers (e.g. pa
 the module, crashing with `Export 'FEEDBACK_TYPES' is not defined in module`. (Apps on
 `moduleResolution: "bundler"` need nothing.)
 
-### 3. Install access for the private dep — the `preinstall` script (do this FIRST)
-`@mavenmm/dev-library` is a **private** git dep. `npm install` clones it over SSH and fails with
-`git ls-remote ssh://git@github.com/… Permission denied (publickey)` unless you set up access.
-Add the `preinstall` script below to your app's `package.json` **before your first install**, then:
+### 3. Install access for the private dep — Netlify `GIT_CONFIG_*` (do this FIRST)
+`@mavenmm/dev-library` is a **private** git dep. npm resolves the `github:` shorthand to
+`git+ssh://` and clones over **SSH** — which **fails on Netlify** with
+`git ls-remote ssh://git@github.com/… Permission denied (publickey)`, because Netlify's build bot
+has no SSH key for dependency repos. (Its per-site deploy key can't be reused on a second repo, and
+[Netlify support confirms](https://answers.netlify.com/t/netlify-deploy-token-needed-for-private-npm-package/6977)
+custom SSH keys aren't wired into the build bot.) **SSH is a dead end on Netlify — authenticate with
+a token over HTTPS instead.**
 
-- **Local dev:** either have SSH access to the `mavenmm` org (most devs do) — then it just works —
-  **or** `export GH_READ_TOKEN=<PAT>` before `npm install` (the preinstall rewrites to HTTPS+token).
-- **CI (Netlify):** set `GH_READ_TOKEN` in the site's **builds** scope; the preinstall does the rest.
-  Netlify's `GIT_CONFIG_*` env vars do **not** apply during the dependency-install stage.
+The reliable mechanism is git's **`GIT_CONFIG_PARAMETERS`** — git reads it on **every** invocation
+from process start, including npm's clone. It packs the whole fix into **one** env var. Set these
+**two** vars on the site in the **builds** scope:
 
-The `preinstall` script (runs at the start of `npm ci`, before the clone; guarded so it no-ops
-locally when `GH_READ_TOKEN` is unset):
-```jsonc
-"scripts": {
-  "preinstall": "if [ -n \"$GH_READ_TOKEN\" ]; then for b in \"git+ssh://git@github.com/\" \"ssh://git@github.com/\" \"git@github.com:\" \"https://github.com/\"; do git config --global url.\"https://$GH_READ_TOKEN@github.com/\".insteadOf \"$b\"; done; fi"
-}
-```
-Set **`GH_READ_TOKEN`** (a fine-grained PAT with read access to `mavenmm/maven-dev-library`) in the
-Netlify site's env, **builds scope**. PATs expire — rotate before they lapse or CD breaks.
+| Env var | Value |
+|---|---|
+| `GIT_CONFIG_PARAMETERS` | `'url.https://github.com/.insteadOf=ssh://git@github.com/' 'url.https://github.com/.insteadOf=git+ssh://git@github.com/' 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_READ_TOKEN}"; }; f'` |
+| `GH_READ_TOKEN` | a fine-grained PAT with **read** access to `mavenmm/maven-dev-library` |
+
+`GIT_CONFIG_PARAMETERS` rewrites `ssh://…github.com` → `https://github.com/` and registers a
+**credential helper that reads `GH_READ_TOKEN` at clone time** — so **no token is stored in the
+config value or the committed lockfile**; the one place the token lives is `GH_READ_TOKEN`. Note the
+exact quoting: each config entry is wrapped in **single quotes**, entries separated by spaces, and
+`${GH_READ_TOKEN}` stays **literal** in the stored value (git's shell expands it when it runs the
+helper). PATs expire — rotate before they lapse or CD breaks.
+
+> **Older 9-var form:** `GIT_CONFIG_COUNT` + `GIT_CONFIG_KEY_n`/`VALUE_n` does the same thing and also
+> works; `GIT_CONFIG_PARAMETERS` is just the one-variable equivalent. Don't set both.
+
+> **Why not a `preinstall` script?** A `preinstall` that runs `git config` is **too late** — npm
+> clones the git dep before (or independently of) the root `preinstall`, so the rewrite never reaches
+> the failing `ls-remote`. It *appears* to work only because Netlify's warm build cache skips the
+> clone entirely; the first **cold / clear-cache** build exposes the failure. `GIT_CONFIG_*` has no
+> such timing gap. (A `preinstall` is fine as a local-dev convenience, but it does **not** fix CI.)
+
+> **Lockfile gotcha:** bumping the `#tag` in `package.json` does **not** reliably re-resolve the git
+> dep in `package-lock.json` — npm can keep the old commit, so installs silently stay on the old
+> version (this is how prod can run a stale version while the tag says otherwise). After bumping, run
+> `npm install "@mavenmm/dev-library@github:mavenmm/maven-dev-library#vX.Y.Z"` and confirm
+> `node_modules/@mavenmm/dev-library/package.json` shows the new version before committing the lock.
+> Always confirm with a **clear-cache** deploy, never a warm one.
+
+**Local dev needs none of the above:** keep the `github:` shorthand and clone over your own GitHub
+SSH key (most devs already have one). Only Netlify needs the `GIT_CONFIG_*` rewrite.
 
 ### 4. Mount the widget
 Copy `FeedbackMount.tsx` from a reference app (paab: `src/components/FeedbackMount.tsx`). It wires the
@@ -139,7 +163,8 @@ couldn't build. Feedback-specific keys to add:
 |---|---|---|
 | `FEEDBACK_WORKER_URL` | `https://maven-feedback-worker.chang-424.workers.dev` | functions |
 | `WORKER_SHARED_SECRET` | shared secret (same value the Worker holds) | functions |
-| `GH_READ_TOKEN` | PAT for the private-dep install (see step 3) | builds |
+| `GH_READ_TOKEN` | fine-grained PAT (read) for the private-dep install — see step 3 | builds |
+| `GIT_CONFIG_COUNT` + `GIT_CONFIG_KEY_*` / `GIT_CONFIG_VALUE_*` | ssh→https rewrite + credential helper — see step 3 (contain **no** secret) | builds |
 | `VITE_FEEDBACK_RICHTEXT` / `VITE_FEEDBACK_VIDEO` | `true` to enable rich text+screenshots / video | builds |
 
 > ⚠️ **`netlify env:set --site X` gotcha:** run `netlify env:*` **from a directory linked to the
@@ -205,7 +230,7 @@ are **shared across all apps** today — no new secret per app. See "Known limit
 - [ ] Worker: "Team feedback" tasklist created in the app's Teamwork project
 - [ ] Worker: `APPS` entry in `src/config.ts` (+ `topicAssignees` if routing); deploy + commit
 - [ ] App: `@mavenmm/dev-library` pinned + **TipTap peers** (if richtext/video)
-- [ ] App: `preinstall` script added; `GH_READ_TOKEN` in the site's **builds** scope
+- [ ] App: `GIT_CONFIG_PARAMETERS` + `GH_READ_TOKEN` in the site's **builds** scope (see step 3)
 - [ ] App: `FeedbackMount.tsx` + 4 proxies + auth helper copied; **`appId` changed**; user token forwarded
 - [ ] App: `<FeedbackRoot>` + `<FeedbackLauncher>` mounted; `/api/*` redirect; env vars set on the SITE
 - [ ] Test: submit while logged in (no forced re-login) → task appears in the right tasklist, as the submitter
@@ -214,8 +239,12 @@ are **shared across all apps** today — no new secret per app. See "Known limit
 - **Modal crashes on open** → missing `@tiptap/extension-placeholder` (or another TipTap peer).
 - **`Export 'FEEDBACK_TYPES' is not defined`** at runtime → a tsconfig `paths` shim for the library is
   being applied at runtime by `vite-tsconfig-paths`, loading the `.d.ts`. Remove it; rely on `typesVersions`.
-- **CI build fails `Permission denied (publickey)`** → missing `preinstall` script or `GH_READ_TOKEN`
-  (in **builds** scope). `GIT_CONFIG_*` env vars alone do **not** work (they don't apply during install).
+- **CI build fails `Permission denied (publickey)`** → `GIT_CONFIG_PARAMETERS` and/or `GH_READ_TOKEN`
+  missing from the site's **builds** scope. This only shows on a **cold/clear-cache** build — warm
+  cache skips the clone and hides it, so always confirm the fix with a clear-cache deploy. A
+  `preinstall` script is **not** sufficient (it runs too late for npm's clone); `GIT_CONFIG_PARAMETERS`
+  is what works. If prod builds green but serves an **old version**, the lockfile didn't re-resolve
+  the bumped tag — see the lockfile gotcha in step 3.
 - **"Unauthorized" until re-login** → the app's session cookie lapsed; add the Bearer fallback (step 5).
 - **Vars didn't take effect** → `netlify env:set --site` run from the wrong linked dir (see step 7 warning).
 - **`appId` mismatch** between proxies and `config.ts` → Worker returns `400 unknown app`.
