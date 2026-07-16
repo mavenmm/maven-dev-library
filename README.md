@@ -24,7 +24,7 @@ consume it directly via **git dependency**.
 (the `preinstall` is what lets an install clone the private dep with a token — add it once):
 ```jsonc
 "dependencies": {
-  "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.0"  // pin a tag (or a commit SHA)
+  "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.1"  // pin a tag (or a commit SHA)
 },
 "scripts": {
   // Rewrites the git@github.com clone → https+token when GH_READ_TOKEN is set (CI); no-ops locally.
