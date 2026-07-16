@@ -14,30 +14,49 @@ consume it directly via **git dependency**.
 
 ## Consume in a Maven app (git dependency)
 
+> ⚠️ **This is a PRIVATE repo — set up clone access FIRST, or `npm install` fails with:**
+> ```
+> npm error command git … ls-remote ssh://git@github.com/mavenmm/maven-dev-library.git
+> npm error git@github.com: Permission denied (publickey).
+> ```
+
+**1. Add the dependency + the one-time `preinstall` script** to your app's `package.json`
+(the `preinstall` is what lets an install clone the private dep with a token — add it once):
 ```jsonc
-// package.json — pin a tag (or a commit SHA)
-"@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.0"
+"dependencies": {
+  "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.0"  // pin a tag (or a commit SHA)
+},
+"scripts": {
+  // Rewrites the git@github.com clone → https+token when GH_READ_TOKEN is set (CI); no-ops locally.
+  "preinstall": "if [ -n \"$GH_READ_TOKEN\" ]; then for b in \"git+ssh://git@github.com/\" \"ssh://git@github.com/\" \"git@github.com:\" \"https://github.com/\"; do git config --global url.\"https://$GH_READ_TOKEN@github.com/\".insteadOf \"$b\"; done; fi"
+}
 ```
 
+**2. Provide clone access:**
+- **Local dev:** either have SSH access to the `mavenmm` org (your GitHub SSH key added — most devs
+  already do), **or** `export GH_READ_TOKEN=<fine-grained PAT>` before `npm install` (the preinstall
+  then rewrites to HTTPS + token).
+- **CI (Netlify):** set `GH_READ_TOKEN` (a fine-grained PAT with read access to this repo) in the
+  site's **builds** scope — the `preinstall` does the rest. Netlify's `GIT_CONFIG_*` env vars do
+  **not** apply during the dependency-install stage, so the `preinstall` is required (not optional).
+
+**3. Import:**
 ```ts
 import { FeedbackProvider, FeedbackLauncher, FeedbackWidget } from "@mavenmm/dev-library/ui";
 import "@mavenmm/dev-library/ui/styles.css";
 import { createTextFeedback /* … */ } from "@mavenmm/dev-library/core";
 ```
 
-- **Peer deps** (when using the widget's rich-text / video): `@tiptap/react`, `@tiptap/pm`,
-  `@tiptap/starter-kit`, `@tiptap/extension-image`, `@tiptap/extension-placeholder` — all `^3`.
-  A missing peer (esp. `extension-placeholder`) crashes the modal on open.
-- **TypeScript:** `exports` + `typesVersions` cover both `bundler` and classic `node` resolution —
-  do **not** add a consumer `paths` shim for this package (it breaks `vite-tsconfig-paths` at runtime).
-- **CI (Netlify):** cloning the private dep needs a `preinstall` git-rewrite + a `GH_READ_TOKEN`
-  build var — `GIT_CONFIG_*` env vars alone don't apply during the dependency-install stage.
+- **Peer deps** (widget rich-text / video): `@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`,
+  `@tiptap/extension-image`, `@tiptap/extension-placeholder` — all `^3`. A missing peer (esp.
+  `extension-placeholder`) crashes the modal on open.
+- **TypeScript:** `exports` + `typesVersions` cover `bundler` and classic `node` — do **not** add a
+  consumer `paths` shim for this package (it breaks `vite-tsconfig-paths` at runtime).
 
 On install, npm runs `prepare` and builds `dist/` automatically — no committed artifacts, no
-registry token. See [`docs/feedback-integration.md`](docs/feedback-integration.md) for the full CI setup.
+registry token. Full CI walkthrough: [`docs/feedback-integration.md`](docs/feedback-integration.md).
 
-**Updating:** bump the `#tag` (or SHA) in the consuming app's `package.json` and reinstall.
-There is no semver range resolution with git deps — you pin and bump explicitly.
+**Updating:** bump the `#tag` (or SHA) and reinstall — no semver range resolution with git deps.
 
 ## Release a new version
 

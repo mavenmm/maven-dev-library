@@ -50,13 +50,18 @@ The library ships `typesVersions` (v0.3.1+) so classic-`node` consumers (e.g. pa
 the module, crashing with `Export 'FEEDBACK_TYPES' is not defined in module`. (Apps on
 `moduleResolution: "bundler"` need nothing.)
 
-### 3. Install the private dep in CI (the `preinstall` script — NOT env vars)
-`@mavenmm/dev-library` is a private git dep. Netlify clones it over SSH during **dependency
-install** and fails with `Permission denied (publickey)` unless the URL is rewritten to HTTPS+token.
+### 3. Install access for the private dep — the `preinstall` script (do this FIRST)
+`@mavenmm/dev-library` is a **private** git dep. `npm install` clones it over SSH and fails with
+`git ls-remote ssh://git@github.com/… Permission denied (publickey)` unless you set up access.
+Add the `preinstall` script below to your app's `package.json` **before your first install**, then:
 
-**Netlify's `GIT_CONFIG_*` env vars do NOT apply during the dependency-install stage** — they only
-reach the build command. The reliable fix is a `preinstall` script (runs at the start of
-`npm ci`, before the git clone), guarded so it no-ops locally (where devs use SSH):
+- **Local dev:** either have SSH access to the `mavenmm` org (most devs do) — then it just works —
+  **or** `export GH_READ_TOKEN=<PAT>` before `npm install` (the preinstall rewrites to HTTPS+token).
+- **CI (Netlify):** set `GH_READ_TOKEN` in the site's **builds** scope; the preinstall does the rest.
+  Netlify's `GIT_CONFIG_*` env vars do **not** apply during the dependency-install stage.
+
+The `preinstall` script (runs at the start of `npm ci`, before the clone; guarded so it no-ops
+locally when `GH_READ_TOKEN` is unset):
 ```jsonc
 "scripts": {
   "preinstall": "if [ -n \"$GH_READ_TOKEN\" ]; then for b in \"git+ssh://git@github.com/\" \"ssh://git@github.com/\" \"git@github.com:\" \"https://github.com/\"; do git config --global url.\"https://$GH_READ_TOKEN@github.com/\".insteadOf \"$b\"; done; fi"
