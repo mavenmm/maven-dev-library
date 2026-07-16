@@ -1,0 +1,50 @@
+# @mavenmm/dev-library
+
+Maven's **private** shared component library (SSOT for reusable UI + backend logic). **Never
+published to a registry** — apps consume it as a pinned **git dependency** (`github:mavenmm/maven-dev-library#vX.Y.Z`).
+
+- `src/core` → `@mavenmm/dev-library/core` — framework-neutral (no React, no DOM). Used by the CF
+  `maven-feedback-worker`.
+- `src/ui` → `@mavenmm/dev-library/ui` — React components. First component: the **feedback widget**.
+- Consumed by **maven-home** and **paab**. To add it to an app, follow
+  [`docs/feedback-integration.md`](docs/feedback-integration.md) — it carries the hard-won integration
+  learnings; read it before changing the widget or advising a consumer.
+
+## Architecture you must not break
+
+- **Shadow DOM (v0.4.0+):** `FeedbackWidget` portals its modal/pill into a shadow root and injects
+  the stylesheet there, so host CSS (Tailwind preflight, global element rules) can't leak in. The CSS
+  is imported as a **string** via the tsup `.css` → `text` loader (`tsup.config.ts`) and injected as a
+  `<style>`. Keep both: the string import (for the shadow root) *and* the copied `dist/styles.css`
+  (for the launcher, which stays in the host light DOM). Inherited props (font/color) intentionally
+  still flow from the host.
+- **`typesVersions` (v0.3.1+)** in `package.json` mirrors `exports` so consumers on classic
+  `moduleResolution: "node"` resolve `/ui` and `/core` types. If you add a subpath, update BOTH
+  `exports` and `typesVersions`.
+- **Peers are external:** React + all `@tiptap/*` are in `tsup.config` `external` and declared as
+  optional peers. Consumers install them; the composer is lazy-loaded and imports TipTap directly.
+
+## Commands
+```bash
+npm install        # runs prepare -> build (tsup + copy styles.css)
+npm test           # vitest — core specs + jsdom UI tests (query the widget THROUGH the shadow root)
+npm run typecheck  # tsc --noEmit
+npm run build      # tsup && cp src/ui/styles.css dist/styles.css
+```
+
+## Release
+```bash
+npm test && npm run build
+# bump "version" in package.json
+# PR the change to main, then tag the merged commit:
+git tag vX.Y.Z origin/main && git push origin vX.Y.Z
+```
+Consumers pin the tag and bump explicitly (no semver ranges with git deps).
+
+## Gotchas
+- UI tests are **shadow-aware** — modal content is in `[data-mvui-feedback-root]`'s shadow root, not
+  the light DOM. Use `within(host.shadowRoot)`, not `screen`.
+- Never tell a consumer to add a tsconfig `paths` entry for this package — `vite-tsconfig-paths`
+  applies it at runtime and loads the `.d.ts` as the module (crash). `typesVersions` already handles it.
+- Version constants (`CORE_VERSION`/`UI_VERSION`) are hand-maintained — keep in sync with `package.json`
+  or drop them (open cleanup).
