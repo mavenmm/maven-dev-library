@@ -88,6 +88,6 @@ docs/       -> specs + implementation plans
 ```
 
 ## Docs
-- **Add the feedback widget to an app:** [`docs/feedback-integration.md`](docs/feedback-integration.md) — step-by-step; maven-home + paab are integrated, Dashboard + Status next. Captures the paab learnings (peer deps, shadow-DOM isolation, CI preinstall, auth fallback, env gotchas).
+- **Add the feedback widget to an app:** [`docs/feedback-integration.md`](docs/feedback-integration.md) — step-by-step; maven-home, paab, and status-update are integrated (Dashboard next). Captures the paab learnings (peer deps, shadow-DOM isolation, CI install via `GIT_CONFIG_PARAMETERS`, auth fallback, env gotchas).
 - Design spec: [`docs/specs/`](docs/specs)
 - Implementation plans: [`docs/plans/`](docs/plans)

@@ -42,6 +42,13 @@ git tag vX.Y.Z origin/main && git push origin vX.Y.Z
 Consumers pin the tag and bump explicitly (no semver ranges with git deps).
 
 ## Gotchas
+- **Consumer CI install is via `GIT_CONFIG_PARAMETERS`, NOT a `preinstall` script.** This is a private
+  git dep; npm clones it over SSH, and Netlify's build bot has no SSH key → cold builds fail with
+  `Permission denied (publickey)`. A `preinstall` git-rewrite runs too late for npm's clone;
+  `GIT_CONFIG_PARAMETERS` (ssh→https rewrite + credential helper reading `GH_READ_TOKEN`) applies from
+  process start. **Warm build cache hides the failure** — verify with a clear-cache deploy. Bumping the
+  `#tag` doesn't always re-resolve `package-lock.json` (prod can silently serve the old version). Full
+  detail + the exact env-var value: `docs/feedback-integration.md` step 3.
 - UI tests are **shadow-aware** — modal content is in `[data-mvui-feedback-root]`'s shadow root, not
   the light DOM. Use `within(host.shadowRoot)`, not `screen`.
 - Never tell a consumer to add a tsconfig `paths` entry for this package — `vite-tsconfig-paths`
