@@ -31,7 +31,7 @@ function mockTransport(overrides: Partial<FeedbackTransport> = {}): FeedbackTran
 
 function mount(transport: FeedbackTransport) {
   return render(
-    <FeedbackProvider config={{ transport, enableRichText: false, enableVideo: true }}>
+    <FeedbackProvider config={{ transport, enableRichText: false, enableVideo: true, defaultMode: "write" }}>
       <FeedbackLauncher />
       <FeedbackWidget />
     </FeedbackProvider>,
@@ -40,7 +40,7 @@ function mount(transport: FeedbackTransport) {
 
 function mountWithTopics(transport: FeedbackTransport) {
   return render(
-    <FeedbackProvider config={{ transport, enableRichText: false, enableVideo: true, topics: [
+    <FeedbackProvider config={{ transport, enableRichText: false, enableVideo: true, defaultMode: "write", topics: [
       { value: "general", label: "PAAB app (general)" },
       { value: "agentic", label: "Agentic feature" },
     ] }}>
@@ -110,5 +110,30 @@ describe("feedback widget portability (mock transport, no backend)", () => {
     const payload = (t.submitText as any).mock.calls[0][0] as TextFeedbackPayload;
     expect(payload.topic).toBe("agentic");
     expect(payload.topicLabel).toBe("Agentic feature");
+  });
+
+  it("defaults to Record video mode when defaultMode is unset", () => {
+    render(
+      <FeedbackProvider config={{ transport: mockTransport(), enableRichText: false, enableVideo: true }}>
+        <FeedbackLauncher />
+        <FeedbackWidget />
+      </FeedbackProvider>,
+    );
+    fireEvent.click(screen.getByText("Feedback"));
+    const rec = panel().getByRole("button", { name: "Record video" }) as HTMLButtonElement;
+    expect(rec.getAttribute("data-active")).toBe("true");
+    // write-mode body composer is not shown in video mode
+    expect(panel().queryByPlaceholderText(/What happened/)).toBeNull();
+  });
+
+  it("honors defaultMode: 'write' (opens on the write form)", () => {
+    render(
+      <FeedbackProvider config={{ transport: mockTransport(), enableRichText: false, enableVideo: true, defaultMode: "write" }}>
+        <FeedbackLauncher />
+        <FeedbackWidget />
+      </FeedbackProvider>,
+    );
+    fireEvent.click(screen.getByText("Feedback"));
+    expect(panel().getByPlaceholderText(/What happened/)).toBeTruthy();
   });
 });

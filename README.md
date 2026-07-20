@@ -23,7 +23,7 @@ consume it directly via **git dependency**.
 **1. Add the dependency** to your app's `package.json`:
 ```jsonc
 "dependencies": {
-  "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.1"  // pin a tag (or a commit SHA)
+  "@mavenmm/dev-library": "github:mavenmm/maven-dev-library#v0.5.2"  // pin a tag (or a commit SHA)
 }
 ```
 

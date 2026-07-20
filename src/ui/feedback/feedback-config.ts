@@ -79,6 +79,9 @@ export interface UiFeedbackConfig {
   topics?: FeedbackTopic[];
   /** Prompt shown on the topic step (default "What's this feedback about?"). */
   topicPrompt?: string;
+  /** Which mode the form opens in. Default "video" (Record video first). Falls back
+   *  to "write" automatically when `enableVideo` is false. */
+  defaultMode?: "write" | "video";
 }
 
 interface FeedbackState { isOpen: boolean; open: () => void; close: () => void; config: UiFeedbackConfig; }

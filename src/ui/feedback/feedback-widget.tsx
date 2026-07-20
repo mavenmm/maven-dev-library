@@ -26,10 +26,12 @@ export function FeedbackWidget() {
   const topics = config.topics;
   const needsTopic = !!(topics && topics.length);
   const topicPrompt = config.topicPrompt ?? "What's this feedback about?";
+  // Default to "Record video" first (Dave's request); fall back to write if video is disabled.
+  const defaultMode: Mode = (config.defaultMode ?? "video") === "video" && enableVideo ? "video" : "write";
 
   const [mounted, setMounted] = useState(false);
   const [shadowEl, setShadowEl] = useState<HTMLElement | null>(null);
-  const [mode, setMode] = useState<Mode>("write");
+  const [mode, setMode] = useState<Mode>(defaultMode);
   const [type, setType] = useState<FeedbackType>("bug");
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
@@ -86,7 +88,7 @@ export function FeedbackWidget() {
   useEffect(() => () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }, [onMove, onUp]);
 
   function resetForm() { setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); setTopic(null); recorder.reset(); }
-  function handleClose() { resetForm(); setMode("write"); close(); }
+  function handleClose() { resetForm(); setMode(defaultMode); close(); }
   function switchMode(next: Mode) {
     if (recorder.status === "recording") return;
     if (next === "write") recorder.reset();
