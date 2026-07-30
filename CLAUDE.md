@@ -26,20 +26,36 @@ published to a registry** — apps consume it as a pinned **git dependency** (`g
 
 ## Commands
 ```bash
-npm install        # runs prepare -> build (tsup + copy styles.css)
+npm install        # deps only — does NOT build (no prepare script; see Release)
 npm test           # vitest — core specs + jsdom UI tests (query the widget THROUGH the shadow root)
 npm run typecheck  # tsc --noEmit
-npm run build      # tsup && cp src/ui/styles.css dist/styles.css
+npm run build      # tsup && cp src/ui/styles.css dist/styles.css — writes the COMMITTED dist/
 ```
 
-## Release
+## Release — `dist/` is committed; YOU MUST BUILD BEFORE TAGGING
+
+`dist/` is checked into git and consumers install it **prebuilt**. There is deliberately **no
+`prepare` script**: when this was built-on-install (≤ v0.5.2), every git install ran tsup inside
+the consumer's package manager, which broke on machines where rollup's platform-native binary
+doesn't install (the maven-dashboard prod droplet — yarn 1's git-dep prepare env hits
+npm/cli#4828) and slowed every Netlify/local install. Do not re-add `prepare`.
+
+The corollary: **a tag ships whatever `dist/` was committed at that tag.** If you change `src/`
+and tag without rebuilding, consumers get the OLD build with the new version number — this fails
+silently. The release checklist, in order:
+
 ```bash
-npm test && npm run build
+npm test && npm run typecheck
+npm run build            # tsup has clean:true, so stale chunks are removed
 # bump "version" in package.json
-# PR the change to main, then tag the merged commit:
+git add -A               # dist/ diff MUST be part of the release commit
+# PR the change to main (or commit directly), then tag the merged commit:
 git tag vX.Y.Z origin/main && git push origin vX.Y.Z
 ```
-Consumers pin the tag and bump explicitly (no semver ranges with git deps).
+
+Sanity check before pushing the tag: `git show vX.Y.Z --stat | grep dist/` — if the release
+changed `src/` but no `dist/` files appear, the build step was skipped. Consumers pin the tag and
+bump explicitly (no semver ranges with git deps).
 
 ## Gotchas
 - **Consumer CI install is via `GIT_CONFIG_PARAMETERS`, NOT a `preinstall` script.** This is a private
