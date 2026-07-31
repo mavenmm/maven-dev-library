@@ -35,13 +35,17 @@ consume it directly via **git dependency**.
 
   | Env var | Value |
   |---|---|
-  | `GIT_CONFIG_PARAMETERS` | `'url.https://github.com/.insteadOf=ssh://git@github.com/' 'url.https://github.com/.insteadOf=git+ssh://git@github.com/' 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_READ_TOKEN}"; }; f'` |
+  | `GIT_CONFIG_PARAMETERS` | `'url.https://github.com/.insteadOf=ssh://git@github.com/' 'url.https://github.com/.insteadOf=git+ssh://git@github.com/' 'url.https://github.com/.insteadOf=git@github.com:' 'credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_READ_TOKEN}"; }; f'` |
   | `GH_READ_TOKEN` | fine-grained PAT, **read** access to this repo |
 
   git reads `GIT_CONFIG_PARAMETERS` on every call from process start, rewrites the `ssh://` clone to
   `https://github.com/`, and a credential helper supplies the token **at clone time** — so no token
-  lands in config or the lockfile. A `preinstall` script does **not** work (it runs too late for
-  npm's clone; warm build cache hides this — verify with a **clear-cache** deploy).
+  lands in config or the lockfile. The three `insteadOf` rules cover every URL form the package
+  managers use: npm clones `ssh://git@github.com/...`, npm's lockfile records `git+ssh://...`, and
+  **pnpm clones the scp-style `git@github.com:...`** — drop the third rule and pnpm-based consumers
+  (e.g. maven-dashboard) fail with `Host key verification failed`. A `preinstall` script does
+  **not** work (it runs too late for npm's clone; warm build cache hides this — verify with a
+  **clear-cache** deploy).
 
 **3. Import:**
 ```ts
