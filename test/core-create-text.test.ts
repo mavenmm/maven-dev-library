@@ -19,7 +19,7 @@ describe("createTextFeedback", () => {
   it("rejects an empty subject without hitting the network", async () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f);
     const res = await createTextFeedback(cfg, { teamworkToken: "T" }, { type: "bug", subject: "  ", pageUrl: "https://h" }, {});
-    expect(res).toEqual({ ok: false, error: expect.stringContaining("subject") });
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining("subject") });
     expect(f).not.toHaveBeenCalled();
   });
   it("creates task + comment + stage; skips follower when soleFollowerId unset", async () => {

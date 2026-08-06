@@ -4,8 +4,17 @@ export function titlePrefixFor(type: FeedbackType): string {
   return FEEDBACK_TYPES.find((t) => t.value === type)?.titlePrefix ?? "Other";
 }
 
+/**
+ * HTML-escape a value on its way into a Teamwork comment.
+ *
+ * Coerces with String() rather than trusting the type: hosts derive `submitter`
+ * from JWT/session payloads, where a numeric userId arrives as a number and used
+ * to blow up here with "s.replace is not a function" — taking down the whole
+ * submission over a display detail (copydeck, 2026-08-04).
+ */
 export function escapeHtml(s: string): string {
-  return s
+  if (s === null || s === undefined) return "";
+  return String(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

@@ -1,5 +1,7 @@
 // @mavenmm/dev-library/core — shared types + per-app config.
 
+import type { FeedbackStep } from "./errors";
+
 export type FeedbackType = "bug" | "feature" | "working_well" | "other";
 
 export interface FeedbackTypeOption { value: FeedbackType; label: string; titlePrefix: string; }
@@ -55,9 +57,18 @@ export interface CreateTextFeedbackInput {
   viewport?: string;
 }
 
+/**
+ * `warnings` lists best-effort steps that failed while the submission itself
+ * succeeded (stage move, follower reset, Vimeo folder filing). The task exists and
+ * the user should be told it worked — but the host has something worth logging.
+ * Absent or empty means everything landed.
+ *
+ * On failure, `step` and `retryable` come straight off the FeedbackError so a host
+ * can branch without parsing `error`.
+ */
 export type CreateFeedbackResult =
-  | { ok: true; taskId: string; url: string }
-  | { ok: false; error: string };
+  | { ok: true; taskId: string; url: string; warnings?: string[] }
+  | { ok: false; error: string; step?: FeedbackStep; retryable?: boolean };
 
 // ─── Video path ──────────────────────────────────────────────────────────────
 export interface VideoUploadTarget { videoId: string; videoUri: string; uploadLink: string; }
@@ -81,6 +92,12 @@ export interface PendingVideo { taskId: string; videoId: string; videoUri?: stri
 export interface SubmitVideoResult { result: CreateFeedbackResult; pending?: PendingVideo; }
 
 export type SummaryOutcome =
-  | { status: "summarized" }
+  | { status: "summarized"; warnings?: string[] }
   | { status: "retry" }            // transcript not ready yet — try again later
-  | { status: "failed"; error: string };
+  /**
+   * `permanent: true` means retrying is pointless (dead token, deleted video, bad
+   * request). A poller MUST stop and surface it rather than spending its attempt
+   * budget — the alternative is what let an expired token look like a slow
+   * transcript for six days.
+   */
+  | { status: "failed"; error: string; permanent?: boolean; step?: FeedbackStep };
