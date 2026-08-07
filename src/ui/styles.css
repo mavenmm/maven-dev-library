@@ -86,3 +86,16 @@
 .mvui-fb-pill-stop:hover { background:#f43f5e; }
 
 @keyframes mvui-fb-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+/* Mic level meter — sits in the recording pill and the expanded recording row.
+   Four bars that move with the user's voice: a muted mic reads as four flat bars
+   for the whole take, which is the only moment they can still fix it. */
+.mvui-fb-mic { display:inline-flex; align-items:flex-end; gap:2px; height:14px; }
+.mvui-fb-mic-bar { width:3px; border-radius:1px; background:#334155; transition:background 80ms linear; }
+.mvui-fb-mic-bar[data-lit="true"] { background:#34d399; }
+.mvui-fb-mic-off { align-items:center; gap:4px; position:relative; font-size:11px; color:#fbbf24; }
+.mvui-fb-mic-slash { position:absolute; left:-1px; top:6px; width:13px; height:1.5px; background:#fbbf24; transform:rotate(-45deg); }
+.mvui-fb-mic-word { white-space:nowrap; }
+/* Amber, not red: a silent recording is a warning, not a failure — the video is
+   still worth sending. Red here would read as "this is broken, stop". */
+.mvui-fb-mic-warn { color:#b45309; }

@@ -196,6 +196,83 @@ var import_react_dom = require("react-dom");
 
 // src/ui/feedback/use-screen-recorder.ts
 var import_react3 = require("react");
+
+// src/ui/feedback/mic-level.ts
+var SILENCE_FLOOR = 0.01;
+function audioContextCtor() {
+  const w = globalThis;
+  return w.AudioContext ?? w.webkitAudioContext ?? null;
+}
+function nullMeter() {
+  return { level: () => 0, sawSound: () => false, stop: () => {
+  } };
+}
+function createMicLevelMeter(stream) {
+  if (!stream || stream.getAudioTracks().length === 0) return nullMeter();
+  const Ctor = audioContextCtor();
+  if (!Ctor) return nullMeter();
+  let ctx;
+  let analyser;
+  let source;
+  try {
+    ctx = new Ctor();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source = ctx.createMediaStreamSource(stream);
+    source.connect(analyser);
+  } catch {
+    return nullMeter();
+  }
+  const buf = new Uint8Array(analyser.fftSize);
+  let smoothed = 0;
+  let sawSound = false;
+  let stopped = false;
+  return {
+    level() {
+      if (stopped) return 0;
+      try {
+        analyser.getByteTimeDomainData(buf);
+      } catch {
+        return 0;
+      }
+      let sumSquares = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const deviation = (buf[i] - 128) / 128;
+        sumSquares += deviation * deviation;
+      }
+      const rms = Math.sqrt(sumSquares / buf.length);
+      if (rms >= SILENCE_FLOOR) sawSound = true;
+      smoothed = rms > smoothed ? rms : smoothed * 0.8 + rms * 0.2;
+      return Math.min(1, smoothed);
+    },
+    sawSound: () => sawSound,
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      try {
+        source.disconnect();
+      } catch {
+      }
+      try {
+        void ctx.close();
+      } catch {
+      }
+    }
+  };
+}
+async function hasAudioInputDevice() {
+  const md = globalThis.navigator?.mediaDevices;
+  if (!md?.enumerateDevices) return null;
+  try {
+    const devices = await md.enumerateDevices();
+    return devices.some((d) => d.kind === "audioinput");
+  } catch {
+    return null;
+  }
+}
+
+// src/ui/feedback/use-screen-recorder.ts
+var LEVEL_POLL_MS = 100;
 function pickMimeType() {
   const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
   for (const c of candidates) {
@@ -209,11 +286,25 @@ function useScreenRecorder() {
   const [blob, setBlob] = (0, import_react3.useState)(null);
   const [previewUrl, setPreviewUrl] = (0, import_react3.useState)(null);
   const [elapsedSec, setElapsedSec] = (0, import_react3.useState)(0);
+  const [micState, setMicState] = (0, import_react3.useState)("live");
+  const [micLevel, setMicLevel] = (0, import_react3.useState)(0);
   const recorderRef = (0, import_react3.useRef)(null);
   const chunksRef = (0, import_react3.useRef)([]);
   const streamsRef = (0, import_react3.useRef)([]);
   const timerRef = (0, import_react3.useRef)(null);
+  const levelTimerRef = (0, import_react3.useRef)(null);
+  const meterRef = (0, import_react3.useRef)(nullMeter());
   const previewUrlRef = (0, import_react3.useRef)(null);
+  const sawSoundRef = (0, import_react3.useRef)(false);
+  (0, import_react3.useEffect)(() => {
+    let cancelled = false;
+    void hasAudioInputDevice().then((has) => {
+      if (!cancelled && has === false) setMicState("no-device");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const cleanupStreams = (0, import_react3.useCallback)(() => {
     streamsRef.current.forEach((s) => s.getTracks().forEach((t) => t.stop()));
     streamsRef.current = [];
@@ -221,6 +312,13 @@ function useScreenRecorder() {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current);
+      levelTimerRef.current = null;
+    }
+    meterRef.current.stop();
+    meterRef.current = nullMeter();
+    setMicLevel(0);
   }, []);
   const start = (0, import_react3.useCallback)(async () => {
     setError(null);
@@ -231,13 +329,25 @@ function useScreenRecorder() {
       let mic = null;
       try {
         mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch {
+        setMicState("live");
+      } catch (err) {
+        const name = err?.name;
+        setMicState(name === "NotAllowedError" || name === "SecurityError" ? "denied" : name === "NotFoundError" ? "no-device" : "unavailable");
       }
       streamsRef.current = mic ? [display, mic] : [display];
       const tracks = [...display.getVideoTracks()];
       if (mic) tracks.push(...mic.getAudioTracks());
       else tracks.push(...display.getAudioTracks());
       const combined = new MediaStream(tracks);
+      const micTrack = mic?.getAudioTracks()[0];
+      if (micTrack) {
+        if (micTrack.muted) setMicState("muted");
+        micTrack.addEventListener("mute", () => setMicState("muted"));
+        micTrack.addEventListener("unmute", () => setMicState("live"));
+      }
+      sawSoundRef.current = false;
+      meterRef.current = createMicLevelMeter(mic);
+      levelTimerRef.current = setInterval(() => setMicLevel(meterRef.current.level()), LEVEL_POLL_MS);
       chunksRef.current = [];
       const rec = new MediaRecorder(combined, { mimeType: pickMimeType() });
       rec.ondataavailable = (e) => {
@@ -248,6 +358,7 @@ function useScreenRecorder() {
         if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
         const url = URL.createObjectURL(b);
         previewUrlRef.current = url;
+        sawSoundRef.current = meterRef.current.sawSound();
         setBlob(b);
         setPreviewUrl(url);
         setStatus("recorded");
@@ -278,6 +389,7 @@ function useScreenRecorder() {
       previewUrlRef.current = null;
     }
     chunksRef.current = [];
+    sawSoundRef.current = false;
     setBlob(null);
     setPreviewUrl(null);
     setElapsedSec(0);
@@ -288,7 +400,21 @@ function useScreenRecorder() {
     cleanupStreams();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
   }, [cleanupStreams]);
-  return { status, error, blob, previewUrl, elapsedSec, start, stop, reset };
+  return {
+    status,
+    error,
+    blob,
+    previewUrl,
+    elapsedSec,
+    start,
+    stop,
+    reset,
+    micState,
+    micLevel,
+    /** Did the finished take carry any sound? Sent with the submission so the
+     *  backend can skip waiting for a transcript that can never exist. */
+    hasAudio: () => sawSoundRef.current
+  };
 }
 
 // src/ui/feedback/upload-video.ts
@@ -430,6 +556,19 @@ var styles_default = `/* @mavenmm/ui feedback widget \u2014 self-contained, scop
 .mvui-fb-pill-stop:hover { background:#f43f5e; }
 
 @keyframes mvui-fb-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+/* Mic level meter \u2014 sits in the recording pill and the expanded recording row.
+   Four bars that move with the user's voice: a muted mic reads as four flat bars
+   for the whole take, which is the only moment they can still fix it. */
+.mvui-fb-mic { display:inline-flex; align-items:flex-end; gap:2px; height:14px; }
+.mvui-fb-mic-bar { width:3px; border-radius:1px; background:#334155; transition:background 80ms linear; }
+.mvui-fb-mic-bar[data-lit="true"] { background:#34d399; }
+.mvui-fb-mic-off { align-items:center; gap:4px; position:relative; font-size:11px; color:#fbbf24; }
+.mvui-fb-mic-slash { position:absolute; left:-1px; top:6px; width:13px; height:1.5px; background:#fbbf24; transform:rotate(-45deg); }
+.mvui-fb-mic-word { white-space:nowrap; }
+/* Amber, not red: a silent recording is a warning, not a failure \u2014 the video is
+   still worth sending. Red here would read as "this is broken, stop". */
+.mvui-fb-mic-warn { color:#b45309; }
 `;
 
 // src/ui/feedback/feedback-widget.tsx
@@ -446,6 +585,21 @@ function errorText(err, fallback) {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err) return err;
   return fallback;
+}
+var MIC_BARS = 4;
+function MicMeter({ level, state }) {
+  if (state !== "live") {
+    const why = state === "denied" ? "mic blocked" : state === "no-device" ? "no mic" : state === "muted" ? "mic muted" : "mic off";
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { className: "mvui-fb-mic mvui-fb-mic-off", title: `${why} \u2014 this recording will have no narration`, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { "aria-hidden": "true", children: "\u{1F399}" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-mic-slash", "aria-hidden": "true" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-mic-word", children: why })
+    ] });
+  }
+  return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-mic", role: "img", "aria-label": `Microphone level ${Math.round(level * 100)}%`, children: Array.from({ length: MIC_BARS }, (_, i) => {
+    const lit = level >= (i + 1) / (MIC_BARS + 1);
+    return /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-mic-bar", "data-lit": lit, style: { height: `${5 + i * 3}px` } }, i);
+  }) });
 }
 function FeedbackWidget() {
   const { isOpen, close, config } = useFeedback();
@@ -577,7 +731,7 @@ function FeedbackWidget() {
     try {
       const target = await transport.createVideoTarget(recorder.blob.size, subject.trim());
       await uploadToVimeoTus(target.uploadLink, recorder.blob, (f) => setUploadProgress(f));
-      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
+      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, hasAudio: recorder.hasAudio(), topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
       setResult(res);
       if (res.ok) {
         recorder.reset();
@@ -600,6 +754,7 @@ function FeedbackWidget() {
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-pill-dot" }),
           mmss(recorder.elapsedSec)
         ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(MicMeter, { level: recorder.micLevel, state: recorder.micState }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-pill-label", children: "recording\u2026" }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "mvui-fb-pill-stop", onClick: recorder.stop, children: "Stop" })
       ] }),
@@ -655,6 +810,7 @@ function VideoPane({ recorder, uploadProgress, submitting }) {
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-pill-dot" }),
         mmss(recorder.elapsedSec)
       ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(MicMeter, { level: recorder.micLevel, state: recorder.micState }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { className: "mvui-fb-hint", children: "Recording\u2026 drive the app, then click Stop." }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "mvui-fb-pill-stop", onClick: recorder.stop, children: "Stop" })
     ] });
@@ -675,6 +831,8 @@ function VideoPane({ recorder, uploadProgress, submitting }) {
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { className: "mvui-fb-video-idle", children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("button", { type: "button", className: "mvui-fb-send", onClick: recorder.start, children: "\u23FA Start recording" }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "mvui-fb-hint", children: "Captures a tab/window + your mic. The widget shrinks to a small pill while recording; click Stop when done." }),
+    recorder.micState === "no-device" && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "mvui-fb-hint mvui-fb-mic-warn", children: "No microphone detected \u2014 this recording will have no sound." }),
+    recorder.micState === "denied" && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "mvui-fb-hint mvui-fb-mic-warn", children: "Microphone access is blocked, so the recording will be silent. Allow it in your browser's site settings to narrate." }),
     recorder.error && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("p", { className: "mvui-fb-err", children: recorder.error })
   ] });
 }

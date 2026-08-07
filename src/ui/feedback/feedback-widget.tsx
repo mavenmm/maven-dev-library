@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackTopic, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
 const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
+import type { MicState } from "./mic-level";
 import { uploadToVimeoTus } from "./upload-video";
 import widgetCss from "../styles.css";
 
@@ -25,6 +26,40 @@ function errorText(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err) return err;
   return fallback;
+}
+
+const MIC_BARS = 4;
+
+/**
+ * Live mic meter. Four bars that move while you talk.
+ *
+ * This is the whole anti-mute feature. It needs no copy, blocks nothing, and a
+ * muted mic reads as four flat bars sitting in the corner of the user's eye for
+ * the length of the recording — which is the moment they can still do something
+ * about it. When the mic is definitely unusable we say so in words instead,
+ * because there is nothing to meter.
+ */
+function MicMeter({ level, state }: { level: number; state: MicState }) {
+  if (state !== "live") {
+    const why = state === "denied" ? "mic blocked" : state === "no-device" ? "no mic" : state === "muted" ? "mic muted" : "mic off";
+    return (
+      <span className="mvui-fb-mic mvui-fb-mic-off" title={`${why} — this recording will have no narration`}>
+        <span aria-hidden="true">🎙</span>
+        <span className="mvui-fb-mic-slash" aria-hidden="true" />
+        <span className="mvui-fb-mic-word">{why}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="mvui-fb-mic" role="img" aria-label={`Microphone level ${Math.round(level * 100)}%`}>
+      {Array.from({ length: MIC_BARS }, (_, i) => {
+        // Each bar lights at a higher threshold, so the meter reads as loudness
+        // rather than all four twitching together.
+        const lit = level >= (i + 1) / (MIC_BARS + 1);
+        return <span key={i} className="mvui-fb-mic-bar" data-lit={lit} style={{ height: `${5 + i * 3}px` }} />;
+      })}
+    </span>
+  );
 }
 
 export function FeedbackWidget() {
@@ -134,7 +169,7 @@ export function FeedbackWidget() {
     try {
       const target = await transport.createVideoTarget(recorder.blob.size, subject.trim());
       await uploadToVimeoTus(target.uploadLink, recorder.blob, (f) => setUploadProgress(f));
-      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
+      const res = await transport.submitVideo({ type, subject: subject.trim(), videoId: target.videoId, videoUri: target.videoUri, hasAudio: recorder.hasAudio(), topic: topic?.value, topicLabel: topic?.label, ...autoContext() });
       setResult(res);
       if (res.ok) { recorder.reset(); setSubject(""); }
     } catch (err) {
@@ -150,6 +185,7 @@ export function FeedbackWidget() {
       <div className="mvui-fb-pill" style={{ top: pos.top, left: pos.left, width: PILL_WIDTH, zIndex: z }}>
         <span className="mvui-fb-pill-grip" onMouseDown={onDown} title="Drag">⠿</span>
         <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
+        <MicMeter level={recorder.micLevel} state={recorder.micState} />
         <span className="mvui-fb-pill-label">recording…</span>
         <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
       </div>,
@@ -244,6 +280,7 @@ function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnT
     return (
       <div className="mvui-fb-video-recording">
         <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
+        <MicMeter level={recorder.micLevel} state={recorder.micState} />
         <span className="mvui-fb-hint">Recording… drive the app, then click Stop.</span>
         <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
       </div>
@@ -264,6 +301,13 @@ function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnT
     <div className="mvui-fb-video-idle">
       <button type="button" className="mvui-fb-send" onClick={recorder.start}>⏺ Start recording</button>
       <p className="mvui-fb-hint">Captures a tab/window + your mic. The widget shrinks to a small pill while recording; click Stop when done.</p>
+      {/* Said BEFORE they record, not after — the only point at which it saves them anything. */}
+      {recorder.micState === "no-device" && (
+        <p className="mvui-fb-hint mvui-fb-mic-warn">No microphone detected — this recording will have no sound.</p>
+      )}
+      {recorder.micState === "denied" && (
+        <p className="mvui-fb-hint mvui-fb-mic-warn">Microphone access is blocked, so the recording will be silent. Allow it in your browser's site settings to narrate.</p>
+      )}
       {recorder.error && <p className="mvui-fb-err">{recorder.error}</p>}
     </div>
   );

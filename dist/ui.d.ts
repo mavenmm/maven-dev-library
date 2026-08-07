@@ -33,6 +33,13 @@ interface VideoFeedbackPayload extends FeedbackContextMeta {
     subject: string;
     videoId: string;
     videoUri: string;
+    /**
+     * Did the recording actually carry sound? False means the mic was muted,
+     * blocked or absent, so Vimeo will never produce auto-captions and the backend
+     * should skip the transcript wait rather than poll for ~80 minutes and then
+     * blame a slow transcript. Optional: older hosts simply omit it.
+     */
+    hasAudio?: boolean;
     /** Selected topic/area (only when the app configures `topics`). */
     topic?: string;
     topicLabel?: string;

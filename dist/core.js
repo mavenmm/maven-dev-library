@@ -472,7 +472,9 @@ async function submitVideoFeedback(cfg, secrets, input, submitter) {
   const tw = cfg.teamwork;
   const token = secrets.teamworkToken;
   const watch = vimeoWatchUrl(input.videoId);
-  const commentHtml = `<p>\u{1F3A5} <strong>Screen recording:</strong> <a href="${escapeHtml(watch)}">${escapeHtml(watch)}</a></p><p>\u{1F916} <em>AI summary pending \u2014 added automatically once the transcript is ready.</em></p>` + buildContextHtml(submitter, { appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport, topicLabel: input.topicLabel });
+  const silent = input.hasAudio === false;
+  const summaryNote = silent ? `<p>\u{1F507} <em>No audio was captured in this recording, so there's no AI summary \u2014 please watch the video.</em></p>` : `<p>\u{1F916} <em>AI summary pending \u2014 added automatically once the transcript is ready.</em></p>`;
+  const commentHtml = `<p>\u{1F3A5} <strong>Screen recording:</strong> <a href="${escapeHtml(watch)}">${escapeHtml(watch)}</a></p>` + summaryNote + buildContextHtml(submitter, { appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport, topicLabel: input.topicLabel });
   const warnings = [];
   let taskId;
   try {
@@ -493,7 +495,7 @@ async function submitVideoFeedback(cfg, secrets, input, submitter) {
   await moveTaskToStage(tw, token, taskId, warnings);
   if (tw.soleFollowerId) await setSoleFollower(tw, token, taskId, tw.soleFollowerId, warnings);
   if (secrets.vimeoToken && cfg.vimeo?.folderId) await moveVideoToFolder(secrets.vimeoToken, input.videoId, cfg.vimeo.folderId, warnings);
-  const pending = { taskId, videoId: input.videoId, videoUri: input.videoUri };
+  const pending = silent ? void 0 : { taskId, videoId: input.videoId, videoUri: input.videoUri };
   return {
     result: {
       ok: true,
@@ -501,7 +503,7 @@ async function submitVideoFeedback(cfg, secrets, input, submitter) {
       url: teamworkTaskUrl(tw, taskId),
       ...warnings.length ? { warnings: warnings.map((w) => w.message) } : {}
     },
-    pending
+    ...pending ? { pending } : {}
   };
 }
 async function summarizePendingVideo(cfg, secrets, pending) {

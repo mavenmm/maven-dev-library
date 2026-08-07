@@ -40,6 +40,15 @@ published to a registry** — apps consume it as a pinned **git dependency** (`g
   later steps fail. Reporting `ok: false` after creation makes users resubmit and duplicates the
   task — one copy being a title with no body, since the failing step *was* the body.
 
+- **Mic verification (v0.7.0+) is a METER, not a gate.** The failure being designed against is
+  someone who muted without noticing and narrates a whole recording for nothing. Four bars in the
+  recording pill move with their voice, so a muted mic reads as four flat bars while they can still
+  fix it. Rules: never block Send, never open a modal, never judge at a fixed timeout. Instant
+  signals (`enumerateDevices`, `NotAllowedError`, `track.muted`) warn in words *before* recording;
+  the RMS meter covers the case none of them can see — a live track delivering silence (hardware
+  mute switch, gain at zero). `hasAudio:false` on submit means the backend files the task with a
+  "no audio" note and does NOT queue it for transcription, because Vimeo can never caption silence.
+
 ## Commands
 ```bash
 npm install        # deps only — does NOT build (no prepare script; see Release)
