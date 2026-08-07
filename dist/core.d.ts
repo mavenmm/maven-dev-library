@@ -54,7 +54,27 @@ type WarningSink = FeedbackWarning[];
 declare function pushWarning(sink: WarningSink | undefined, warning: FeedbackWarning): void;
 /** Normalise an unknown thrown value to a message, without losing non-Error throws. */
 declare function messageOf(err: unknown): string;
-/** Read a response body for an error message without letting that read throw. */
+/**
+ * Read a response body IN FULL without letting the read itself throw.
+ *
+ * Use this whenever the body will be parsed. A response body can only be read
+ * once, so the same string has to serve both `JSON.parse` and any error message —
+ * truncate at the message, never at the read.
+ */
+declare function readBodyText(res: {
+    text(): Promise<string>;
+}): Promise<string>;
+/** Clip a body to a sensible length for an error message. */
+declare function snip(text: string, limit?: number): string;
+/**
+ * Read a body purely to quote it in an error message — truncated at the source.
+ *
+ * DANGER: never JSON.parse the result. Doing exactly that broke Vimeo uploads in
+ * v0.6.0: this clipped the response to 300 chars and the caller parsed the clipped
+ * string, so every large-but-valid payload came back as "unparseable JSON".
+ * Teamwork's create response is short enough to survive, which is why only the
+ * video path failed. Parse with {@link readBodyText}, quote with {@link snip}.
+ */
 declare function safeBodyText(res: {
     text(): Promise<string>;
 }, limit?: number): Promise<string>;
@@ -311,4 +331,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, type TeamworkConfig, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, safeBodyText, setSoleFollower, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, type TeamworkConfig, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, vimeoWatchUrl, vttToText };

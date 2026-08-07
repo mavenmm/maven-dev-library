@@ -1,5 +1,5 @@
 import type { VideoUploadTarget } from "./types";
-import { FeedbackError, isPermanentHttpStatus, messageOf, pushWarning, safeBodyText, type WarningSink } from "./errors";
+import { FeedbackError, isPermanentHttpStatus, messageOf, pushWarning, readBodyText, safeBodyText, snip, type WarningSink } from "./errors";
 
 const VIMEO_API = "https://api.vimeo.com";
 
@@ -22,13 +22,14 @@ export async function createVimeoUpload(token: string, name: string, sizeBytes: 
     throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload could not reach the API: ${messageOf(err)}`, cause: err });
   }
 
-  const text = await safeBodyText(res);
+  // FULL body — it gets parsed below. Truncate only when quoting it in a message.
+  const text = await readBodyText(res);
   if (!res.ok) {
     throw new FeedbackError({
       step: "vimeo.createUpload",
-      message: `Vimeo create-upload failed: HTTP ${res.status} — ${text}`,
+      message: `Vimeo create-upload failed: HTTP ${res.status} — ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
     });
   }
 
@@ -36,7 +37,7 @@ export async function createVimeoUpload(token: string, name: string, sizeBytes: 
   try {
     j = JSON.parse(text) as typeof j;
   } catch (err) {
-    throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload returned unparseable JSON — ${text}`, httpStatus: res.status, responseBody: text, cause: err, retryable: false });
+    throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload returned unparseable JSON — ${snip(text)}`, httpStatus: res.status, responseBody: snip(text), cause: err, retryable: false });
   }
 
   const uploadLink = j.upload?.upload_link ?? "";
@@ -47,9 +48,9 @@ export async function createVimeoUpload(token: string, name: string, sizeBytes: 
     // was unanswerable from the log alone.
     throw new FeedbackError({
       step: "vimeo.createUpload",
-      message: `Vimeo create-upload returned no upload link or id — ${text}`,
+      message: `Vimeo create-upload returned no upload link or id — ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       retryable: false,
     });
   }

@@ -114,11 +114,35 @@ export function messageOf(err: unknown): string {
   }
 }
 
-/** Read a response body for an error message without letting that read throw. */
-export async function safeBodyText(res: { text(): Promise<string> }, limit = 300): Promise<string> {
+/**
+ * Read a response body IN FULL without letting the read itself throw.
+ *
+ * Use this whenever the body will be parsed. A response body can only be read
+ * once, so the same string has to serve both `JSON.parse` and any error message —
+ * truncate at the message, never at the read.
+ */
+export async function readBodyText(res: { text(): Promise<string> }): Promise<string> {
   try {
-    return (await res.text()).slice(0, limit);
+    return await res.text();
   } catch {
     return "<unreadable response body>";
   }
+}
+
+/** Clip a body to a sensible length for an error message. */
+export function snip(text: string, limit = 300): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+}
+
+/**
+ * Read a body purely to quote it in an error message — truncated at the source.
+ *
+ * DANGER: never JSON.parse the result. Doing exactly that broke Vimeo uploads in
+ * v0.6.0: this clipped the response to 300 chars and the caller parsed the clipped
+ * string, so every large-but-valid payload came back as "unparseable JSON".
+ * Teamwork's create response is short enough to survive, which is why only the
+ * video path failed. Parse with {@link readBodyText}, quote with {@link snip}.
+ */
+export async function safeBodyText(res: { text(): Promise<string> }, limit = 300): Promise<string> {
+  return snip(await readBodyText(res), limit);
 }

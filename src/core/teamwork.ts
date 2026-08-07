@@ -1,5 +1,5 @@
 import type { TeamworkConfig } from "./types";
-import { FeedbackError, messageOf, pushWarning, safeBodyText, type WarningSink } from "./errors";
+import { FeedbackError, messageOf, pushWarning, readBodyText, safeBodyText, snip, type WarningSink } from "./errors";
 
 function authHeaders(token: string, extra: Record<string, string> = {}): Record<string, string> {
   return { Authorization: `Bearer ${token}`, ...extra };
@@ -50,13 +50,14 @@ export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: s
     throw new FeedbackError({ step: "teamwork.createTask", message: `Teamwork task create could not reach the API: ${messageOf(err)}`, cause: err });
   }
 
-  const text = await safeBodyText(res);
+  // FULL body — it gets parsed below. Truncate only when quoting it in a message.
+  const text = await readBodyText(res);
   if (!res.ok) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create failed: HTTP ${res.status} — ${text}`,
+      message: `Teamwork task create failed: HTTP ${res.status} — ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
     });
   }
 
@@ -67,9 +68,9 @@ export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: s
   } catch (err) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create returned unparseable JSON — ${text}`,
+      message: `Teamwork task create returned unparseable JSON — ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       cause: err,
       // A 200 with a broken body is a contract break, not a blip. Retrying would
       // create a SECOND task, so this must never be retried.
@@ -79,9 +80,9 @@ export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: s
   if (!taskId) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create returned no id — ${text}`,
+      message: `Teamwork task create returned no id — ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       retryable: false,
     });
   }

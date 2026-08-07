@@ -40,8 +40,10 @@ __export(core_exports, {
   moveTaskToStage: () => moveTaskToStage,
   moveVideoToFolder: () => moveVideoToFolder,
   pushWarning: () => pushWarning,
+  readBodyText: () => readBodyText,
   safeBodyText: () => safeBodyText,
   setSoleFollower: () => setSoleFollower,
+  snip: () => snip,
   submitVideoFeedback: () => submitVideoFeedback,
   summarizePendingVideo: () => summarizePendingVideo,
   summarizeTranscript: () => summarizeTranscript,
@@ -93,12 +95,18 @@ function messageOf(err) {
     return String(err);
   }
 }
-async function safeBodyText(res, limit = 300) {
+async function readBodyText(res) {
   try {
-    return (await res.text()).slice(0, limit);
+    return await res.text();
   } catch {
     return "<unreadable response body>";
   }
+}
+function snip(text, limit = 300) {
+  return text.length > limit ? `${text.slice(0, limit)}\u2026` : text;
+}
+async function safeBodyText(res, limit = 300) {
+  return snip(await readBodyText(res), limit);
 }
 
 // src/core/types.ts
@@ -164,13 +172,13 @@ async function createFeedbackTaskInTeamwork(cfg, token, title) {
   } catch (err) {
     throw new FeedbackError({ step: "teamwork.createTask", message: `Teamwork task create could not reach the API: ${messageOf(err)}`, cause: err });
   }
-  const text = await safeBodyText(res);
+  const text = await readBodyText(res);
   if (!res.ok) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create failed: HTTP ${res.status} \u2014 ${text}`,
+      message: `Teamwork task create failed: HTTP ${res.status} \u2014 ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text
+      responseBody: snip(text)
     });
   }
   let taskId = "";
@@ -180,9 +188,9 @@ async function createFeedbackTaskInTeamwork(cfg, token, title) {
   } catch (err) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create returned unparseable JSON \u2014 ${text}`,
+      message: `Teamwork task create returned unparseable JSON \u2014 ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       cause: err,
       // A 200 with a broken body is a contract break, not a blip. Retrying would
       // create a SECOND task, so this must never be retried.
@@ -192,9 +200,9 @@ async function createFeedbackTaskInTeamwork(cfg, token, title) {
   if (!taskId) {
     throw new FeedbackError({
       step: "teamwork.createTask",
-      message: `Teamwork task create returned no id \u2014 ${text}`,
+      message: `Teamwork task create returned no id \u2014 ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       retryable: false
     });
   }
@@ -355,20 +363,20 @@ async function createVimeoUpload(token, name, sizeBytes) {
   } catch (err) {
     throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload could not reach the API: ${messageOf(err)}`, cause: err });
   }
-  const text = await safeBodyText(res);
+  const text = await readBodyText(res);
   if (!res.ok) {
     throw new FeedbackError({
       step: "vimeo.createUpload",
-      message: `Vimeo create-upload failed: HTTP ${res.status} \u2014 ${text}`,
+      message: `Vimeo create-upload failed: HTTP ${res.status} \u2014 ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text
+      responseBody: snip(text)
     });
   }
   let j;
   try {
     j = JSON.parse(text);
   } catch (err) {
-    throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload returned unparseable JSON \u2014 ${text}`, httpStatus: res.status, responseBody: text, cause: err, retryable: false });
+    throw new FeedbackError({ step: "vimeo.createUpload", message: `Vimeo create-upload returned unparseable JSON \u2014 ${snip(text)}`, httpStatus: res.status, responseBody: snip(text), cause: err, retryable: false });
   }
   const uploadLink = j.upload?.upload_link ?? "";
   const videoUri = j.uri ?? "";
@@ -376,9 +384,9 @@ async function createVimeoUpload(token, name, sizeBytes) {
   if (!uploadLink || !videoId) {
     throw new FeedbackError({
       step: "vimeo.createUpload",
-      message: `Vimeo create-upload returned no upload link or id \u2014 ${text}`,
+      message: `Vimeo create-upload returned no upload link or id \u2014 ${snip(text)}`,
       httpStatus: res.status,
-      responseBody: text,
+      responseBody: snip(text),
       retryable: false
     });
   }
@@ -617,8 +625,10 @@ var CORE_VERSION = "0.3.0";
   moveTaskToStage,
   moveVideoToFolder,
   pushWarning,
+  readBodyText,
   safeBodyText,
   setSoleFollower,
+  snip,
   submitVideoFeedback,
   summarizePendingVideo,
   summarizeTranscript,

@@ -5,6 +5,9 @@ import {
   summarizePendingVideo,
   fetchTranscriptResult,
   moveTaskToStage,
+  createVimeoUpload,
+  createFeedbackTaskInTeamwork,
+  snip,
   escapeHtml,
   FeedbackError,
   isFeedbackError,
@@ -150,6 +153,38 @@ describe("finding 4 — errors carry structure, not just a message", () => {
     expect(JSON.parse(JSON.stringify(e.toDetail()))).toEqual({
       step: "anthropic.summarize", message: "boom", httpStatus: 429, retryable: true, responseBody: "slow down",
     });
+  });
+});
+
+// v0.6.0 regression, caught in production ~35 min after deploy: safeBodyText()
+// clipped the body to 300 chars and the caller JSON.parse'd the CLIPPED string, so
+// every valid-but-large payload came back "unparseable". Vimeo's create-upload
+// response is ~1.5KB, so all video feedback 500'd; Teamwork's create response is
+// short enough to survive, which is why text feedback looked fine.
+describe("regression — a large but valid response body must parse", () => {
+  it("createVimeoUpload parses a response far longer than the 300-char message limit", async () => {
+    const big = {
+      uri: "/videos/1216449347",
+      upload: { upload_link: "https://tus.vimeo.com/x" },
+      // Real Vimeo replies carry embed html, pictures, privacy, user… ~1.5KB.
+      padding: "x".repeat(2000),
+    };
+    expect(JSON.stringify(big).length).toBeGreaterThan(300);
+    vi.stubGlobal("fetch", vi.fn(async () => res(true, 200, big)));
+    await expect(createVimeoUpload("V", "Feedback: probe", 1234)).resolves.toEqual({
+      videoId: "1216449347", videoUri: "/videos/1216449347", uploadLink: "https://tus.vimeo.com/x",
+    });
+  });
+
+  it("createFeedbackTaskInTeamwork parses an oversized create response", async () => {
+    const big = { id: 777, padding: "y".repeat(2000) };
+    vi.stubGlobal("fetch", vi.fn(async () => res(true, 200, big)));
+    await expect(createFeedbackTaskInTeamwork(cfg.teamwork, "T", "title")).resolves.toBe("777");
+  });
+
+  it("error messages still clip, so a huge body can't flood a log line", () => {
+    expect(snip("z".repeat(5000)).length).toBeLessThanOrEqual(301);
+    expect(snip("short")).toBe("short");
   });
 });
 
