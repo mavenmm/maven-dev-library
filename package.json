@@ -17,9 +17,9 @@
     }
   },
   "files": ["dist", "src"],
+  "//scripts": "No `prepare` script — dist/ is COMMITTED and consumers install it prebuilt. A prepare build broke git installs on machines where rollup's native binary fails (e.g. the dashboard droplet). Run `npm run build` and commit dist/ BEFORE tagging a release.",
   "scripts": {
     "build": "tsup && cp src/ui/styles.css dist/styles.css",
-    "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json"
