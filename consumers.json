@@ -1,5 +1,5 @@
 {
-  "//": "Every app that installs @mavenmm/dev-library. Single source of truth for rollouts — scripts/consumers.sh reads it, and so should you. Adding an app? Add it HERE, not to a script.",
+  "//": "Every app that installs @mavenmm/dev-library. Single source of truth for rollouts \u2014 scripts/consumers.sh reads it, and so should you. Adding an app? Add it HERE, not to a script.",
   "workspaceRoot": "~/Documents/Github",
   "apps": [
     {
@@ -11,7 +11,8 @@
       "pkgDir": ".",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "Highest feedback volume — the canary. Video enabled."
+      "notes": "Highest feedback volume \u2014 the canary. Video enabled.",
+      "packageManager": "npm"
     },
     {
       "id": "newsletter",
@@ -22,7 +23,8 @@
       "pkgDir": ".",
       "defaultBranch": "main",
       "deploy": "netlify",
-      "notes": "Needs npm >= 11.16.0 — older npm cannot install a git dep with min-release-age set."
+      "notes": "Needs npm >= 11.16.0 \u2014 older npm cannot install a git dep with min-release-age set.",
+      "packageManager": "npm"
     },
     {
       "id": "maven-home",
@@ -33,7 +35,8 @@
       "pkgDir": ".",
       "defaultBranch": "main",
       "deploy": "netlify",
-      "notes": "Furthest behind. Jumping from v0.3.0 also picks up shadow DOM (v0.4.0) and the Record-video default (v0.5.2). Roll out ALONE so a failure isn't ambiguous."
+      "notes": "Furthest behind. Jumping from v0.3.0 also picks up shadow DOM (v0.4.0) and the Record-video default (v0.5.2). Roll out ALONE so a failure isn't ambiguous.",
+      "packageManager": "npm"
     },
     {
       "id": "status-update",
@@ -44,7 +47,8 @@
       "pkgDir": ".",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "VITE_FEEDBACK_VIDEO not set locally — confirm it exists in the Netlify build env or the meter never renders."
+      "notes": "VITE_FEEDBACK_VIDEO not set locally \u2014 confirm it exists in the Netlify build env or the meter never renders.",
+      "packageManager": "npm"
     },
     {
       "id": "dashboard",
@@ -55,7 +59,9 @@
       "pkgDir": "ui",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "Dep lives in ui/, not the repo root. Prod droplet historically failed on build-on-install — fine since v0.5.3 ships prebuilt dist/."
+      "notes": "pnpm WORKSPACE (server/ui/shared) \u2014 not npm. The dep lives in ui/ but the lockfile is pnpm-lock.yaml at the repo ROOT, so a bump stages ui/package.json plus the root lockfile. Netlify's base dir is configured in the Netlify UI, not netlify.toml \u2014 verify there if a bump appears not to deploy.",
+      "packageManager": "pnpm",
+      "workspacePackage": "@maven-dashboard/ui"
     },
     {
       "id": "copydeck",
@@ -66,7 +72,8 @@
       "pkgDir": "app",
       "defaultBranch": "main",
       "deploy": "github-actions",
-      "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge — NOT Netlify. Dep lives in app/."
+      "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge \u2014 NOT Netlify. Dep lives in app/.",
+      "packageManager": "npm"
     }
   ],
   "worker": {
@@ -77,6 +84,8 @@
     "pkgDir": ".",
     "defaultBranch": "main",
     "deploy": "wrangler",
-    "notes": "Consumes /core only. Task creation and the Teamwork/Vimeo/summary pipeline live here, so /core fixes reach ALL apps with this one deploy."
-  }
+    "notes": "Consumes /core only. Task creation and the Teamwork/Vimeo/summary pipeline live here, so /core fixes reach ALL apps with this one deploy.",
+    "packageManager": "npm"
+  },
+  "//packageManager": "npm unless stated. pnpm apps are workspaces: install runs at the repo root with --filter <workspacePackage>, and the lockfile is pnpm-lock.yaml at the root, NOT beside the package.json."
 }

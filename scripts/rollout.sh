@@ -56,7 +56,7 @@ if want and len(apps) != len(want):
     print(f'echo "unknown app(s): {" ".join(sorted(missing))}" >&2; exit 1')
     sys.exit(0)
 print("ROOT=" + shlex.quote(root))
-print("APPS=(" + " ".join(shlex.quote("|".join([a["id"], a["path"], a.get("pkgDir", "."), a["defaultBranch"], a["deploy"]])) for a in apps) + ")")
+print("APPS=(" + " ".join(shlex.quote("|".join([a["id"], a["path"], a.get("pkgDir", "."), a["defaultBranch"], a["deploy"], a.get("packageManager", "npm"), a.get("workspacePackage", "")])) for a in apps) + ")")
 PY
 )"
 
@@ -66,10 +66,10 @@ echo
 
 FAILED=()
 for spec in "${APPS[@]}"; do
-  IFS='|' read -r id path pkgdir defbranch deploy <<< "$spec"
+  IFS='|' read -r id path pkgdir defbranch deploy pm wspkg <<< "$spec"
   repo="$ROOT/$path"
   pkg="$repo/$pkgdir"
-  echo "── $id  ($path, deploys via $deploy)"
+  echo "── $id  ($path, $pm, deploys via $deploy)"
 
   [ -d "$repo/.git" ] || { echo "   SKIP: not a git repo"; FAILED+=("$id:no-repo"); continue; }
 
@@ -91,7 +91,7 @@ for spec in "${APPS[@]}"; do
   fi
 
   if ! $APPLY; then
-    echo "   would: branch $BRANCH, install $DEP in $pkgdir/, verify, push, open PR"
+    echo "   would: branch $BRANCH, $pm-install $DEP into ${wspkg:-$pkgdir/}, verify, push, open PR"
     continue
   fi
 
@@ -99,11 +99,22 @@ for spec in "${APPS[@]}"; do
   git -C "$repo" pull -q --ff-only
   git -C "$repo" checkout -q -B "$BRANCH"
 
-  # --save forces re-resolution. Plain `npm install` honours the stale lockfile
-  # entry and leaves the OLD version on disk while package.json claims the new one.
-  ( cd "$pkg" && npm install "$DEP" --save >/dev/null 2>&1 ) || {
-    echo "   FAIL: npm install failed (npm >= 11.16.0 is required with min-release-age)"
-    git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:install"); continue; }
+  # Package manager differs per app — dashboard is a pnpm workspace, and running
+  # npm there silently produces the wrong lockfile. `--save` / `add` force
+  # re-resolution: a plain install honours the stale lockfile entry and leaves the
+  # OLD version on disk while package.json claims the new one.
+  installed_ok=true
+  if [ "$pm" = "pnpm" ]; then
+    # Runs at the repo ROOT with a filter; the lockfile is the root pnpm-lock.yaml.
+    ( cd "$repo" && pnpm --filter "$wspkg" add "$DEP" >/tmp/rollout-install.log 2>&1 ) || installed_ok=false
+  else
+    ( cd "$pkg" && npm install "$DEP" --save >/tmp/rollout-install.log 2>&1 ) || installed_ok=false
+  fi
+  if ! $installed_ok; then
+    echo "   FAIL: $pm install failed — last lines:"
+    tail -4 /tmp/rollout-install.log | sed 's/^/     /'
+    git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:install"); continue
+  fi
 
   got="$(node -p "require('$pkg/node_modules/@mavenmm/dev-library/package.json').version" 2>/dev/null || echo '?')"
   want="${VERSION#v}"
@@ -121,7 +132,12 @@ for spec in "${APPS[@]}"; do
   # ONLY the manifest and lockfile. `git add -A` here would commit whatever
   # untracked files happen to be lying around the consumer repo.
   git -C "$repo" add "$pkg/package.json"
-  [ -f "$pkg/package-lock.json" ] && git -C "$repo" add "$pkg/package-lock.json"
+  # pnpm keeps ONE lockfile at the workspace root; npm keeps one beside the manifest.
+  if [ "$pm" = "pnpm" ]; then
+    [ -f "$repo/pnpm-lock.yaml" ] && git -C "$repo" add "$repo/pnpm-lock.yaml"
+  else
+    [ -f "$pkg/package-lock.json" ] && git -C "$repo" add "$pkg/package-lock.json"
+  fi
   staged="$(git -C "$repo" diff --cached --name-only | wc -l | tr -d ' ')"
   if [ "$staged" = "0" ]; then
     echo "   FAIL: nothing staged — package.json did not change?"
