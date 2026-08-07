@@ -73,12 +73,15 @@ for spec in "${APPS[@]}"; do
 
   [ -d "$repo/.git" ] || { echo "   SKIP: not a git repo"; FAILED+=("$id:no-repo"); continue; }
 
-  dirty="$(git -C "$repo" status --porcelain | wc -l | tr -d ' ')"
+  # TRACKED changes only. Untracked files (stray exports, deno.lock, .claude/) are
+  # everywhere in these repos and cannot affect a dependency bump — refusing over
+  # them just means the rollout never runs.
+  dirty="$(git -C "$repo" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
   cur="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
-  echo "   branch=$cur (expected $defbranch), uncommitted=$dirty"
+  echo "   branch=$cur (expected $defbranch), modified-tracked=$dirty"
 
   if [ "$dirty" != "0" ]; then
-    echo "   SKIP: working tree is dirty — commit or stash first, this script will not stash for you"
+    echo "   SKIP: tracked files modified — commit or stash first, this script will not stash for you"
     FAILED+=("$id:dirty"); continue
   fi
   if [ "$cur" != "$defbranch" ]; then
@@ -115,7 +118,16 @@ for spec in "${APPS[@]}"; do
   fi
   echo "   verified: $got on disk, marker present in dist/ui.js"
 
-  git -C "$repo" add -A
+  # ONLY the manifest and lockfile. `git add -A` here would commit whatever
+  # untracked files happen to be lying around the consumer repo.
+  git -C "$repo" add "$pkg/package.json"
+  [ -f "$pkg/package-lock.json" ] && git -C "$repo" add "$pkg/package-lock.json"
+  staged="$(git -C "$repo" diff --cached --name-only | wc -l | tr -d ' ')"
+  if [ "$staged" = "0" ]; then
+    echo "   FAIL: nothing staged — package.json did not change?"
+    git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:nothing-staged"); continue
+  fi
+  echo "   staging $staged file(s): $(git -C "$repo" diff --cached --name-only | tr '\n' ' ')"
   git -C "$repo" commit -q -m "Bump @mavenmm/dev-library to $VERSION
 
 Verified on disk (not just in package.json): node_modules reports $got and
