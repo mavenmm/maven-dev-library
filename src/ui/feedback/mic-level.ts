@@ -108,6 +108,43 @@ export function createMicLevelMeter(stream: MediaStream | null): MicLevelMeter {
 }
 
 /**
+ * Tidy a raw MediaDeviceInfo/track label for display.
+ *
+ * Browsers hand back things like "Default - MacBook Pro Microphone (Built-in)" or
+ * "Yeti Stereo Microphone (b58e:9e84)". The user only needs the device, not
+ * Chrome's routing prefix or a USB vendor id.
+ */
+export function prettyDeviceLabel(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = String(raw)
+    .replace(/^(default|communications)\s*[-–]\s*/i, "")
+    .replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "")
+    .trim();
+  return cleaned || null;
+}
+
+/**
+ * Label of the microphone that will actually be used, or null if unknown.
+ *
+ * Labels are only exposed AFTER the origin has been granted mic permission, so
+ * this returns null on a first visit — callers must treat that as "don't show a
+ * name", never as "no mic".
+ */
+export async function defaultAudioInputLabel(): Promise<string | null> {
+  const md = globalThis.navigator?.mediaDevices;
+  if (!md?.enumerateDevices) return null;
+  try {
+    const inputs = (await md.enumerateDevices()).filter((d) => d.kind === "audioinput");
+    if (!inputs.length) return null;
+    // Chrome lists the active choice first as deviceId "default".
+    const preferred = inputs.find((d) => d.deviceId === "default") ?? inputs[0];
+    return prettyDeviceLabel(preferred.label);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Is there an audio input at all? Answers BEFORE any permission prompt — browsers
  * expose device *presence* without labels pre-permission — so the widget can warn
  * before the user records rather than after.
@@ -126,4 +163,25 @@ export async function hasAudioInputDevice(): Promise<boolean | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Where THIS user unmutes their microphone.
+ *
+ * The path differs per OS, and naming the wrong one is worse than staying vague —
+ * a Windows user told to open "System Settings → Sound → Input" concludes the
+ * message isn't for them. Falls back to neutral wording when we can't tell.
+ */
+export function unmuteHint(): string {
+  const nav = globalThis.navigator as (Navigator & { userAgentData?: { platform?: string } }) | undefined;
+  // userAgentData is Chromium-only; userAgent is the portable fallback. We match
+  // on both rather than the deprecated navigator.platform alone.
+  const raw = `${nav?.userAgentData?.platform ?? ""} ${nav?.platform ?? ""} ${nav?.userAgent ?? ""}`.toLowerCase();
+  // Order matters: iPadOS reports "mac" in its UA, and Android reports "linux".
+  if (/android/.test(raw)) return "your device's sound settings";
+  if (/iphone|ipad|ipod/.test(raw)) return "Settings → Privacy & Security → Microphone";
+  if (/mac os|macintosh|macos/.test(raw)) return "System Settings → Sound → Input";
+  if (/windows|win32|win64/.test(raw)) return "Settings → System → Sound → Input";
+  if (/linux|x11|cros/.test(raw)) return "your system sound settings";
+  return "your system sound settings";
 }

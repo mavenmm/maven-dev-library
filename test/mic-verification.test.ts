@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createMicLevelMeter, hasAudioInputDevice, nullMeter, SILENCE_FLOOR } from "../src/ui/feedback/mic-level";
+import { createMicLevelMeter, defaultAudioInputLabel, hasAudioInputDevice, nullMeter, prettyDeviceLabel, unmuteHint, SILENCE_FLOOR } from "../src/ui/feedback/mic-level";
 import { submitVideoFeedback, type FeedbackConfig } from "../src/core/index";
 
 // Acceptance bullets for the mic-verification feature, written from the plan
@@ -48,6 +48,62 @@ describe("1 + 2 — device presence and permission are knowable, not swallowed",
 
     vi.stubGlobal("navigator", { mediaDevices: { enumerateDevices: async () => { throw new Error("nope"); } } });
     expect(await hasAudioInputDevice()).toBeNull();
+  });
+});
+
+describe("naming the mic in use", () => {
+  it("strips the browser's routing prefix and USB vendor ids", () => {
+    expect(prettyDeviceLabel("Default - MacBook Pro Microphone (Built-in)")).toBe("MacBook Pro Microphone (Built-in)");
+    expect(prettyDeviceLabel("Yeti Stereo Microphone (b58e:9e84)")).toBe("Yeti Stereo Microphone");
+    expect(prettyDeviceLabel("Communications - Headset")).toBe("Headset");
+    expect(prettyDeviceLabel("AirPods Pro")).toBe("AirPods Pro");
+  });
+
+  it("returns null for the empty label a browser gives before permission", () => {
+    expect(prettyDeviceLabel("")).toBeNull();
+    expect(prettyDeviceLabel(null)).toBeNull();
+    expect(prettyDeviceLabel("   ")).toBeNull();
+  });
+
+  it("prefers the device the browser marks as default", async () => {
+    vi.stubGlobal("navigator", { mediaDevices: { enumerateDevices: async () => [
+      { kind: "audioinput", deviceId: "abc", label: "Yeti Stereo Microphone (b58e:9e84)" },
+      { kind: "audioinput", deviceId: "default", label: "Default - AirPods Pro" },
+    ] } });
+    expect(await defaultAudioInputLabel()).toBe("AirPods Pro");
+  });
+
+  it("is null when no label is exposed yet (first visit, permission not granted)", async () => {
+    vi.stubGlobal("navigator", { mediaDevices: { enumerateDevices: async () => [{ kind: "audioinput", deviceId: "", label: "" }] } });
+    expect(await defaultAudioInputLabel()).toBeNull();
+  });
+});
+
+describe("recovery instructions match the user's OS", () => {
+  const as = (ua: string, platform = "") => vi.stubGlobal("navigator", { userAgent: ua, platform });
+
+  it("names the right settings path per platform", () => {
+    as("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)");
+    expect(unmuteHint()).toBe("System Settings → Sound → Input");
+    as("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    expect(unmuteHint()).toBe("Settings → System → Sound → Input");
+    as("Mozilla/5.0 (X11; Linux x86_64)");
+    expect(unmuteHint()).toBe("your system sound settings");
+  });
+
+  it("does not mistake an iPad for a Mac — iPadOS reports 'Mac OS X' in its UA", () => {
+    as("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15");
+    expect(unmuteHint()).toBe("Settings → Privacy & Security → Microphone");
+  });
+
+  it("does not mistake Android for Linux", () => {
+    as("Mozilla/5.0 (Linux; Android 14; Pixel 8)");
+    expect(unmuteHint()).toBe("your device's sound settings");
+  });
+
+  it("stays neutral rather than guessing when the platform is unknown", () => {
+    vi.stubGlobal("navigator", undefined);
+    expect(unmuteHint()).toBe("your system sound settings");
   });
 });
 

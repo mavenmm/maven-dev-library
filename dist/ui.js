@@ -106,6 +106,11 @@ function createMicLevelMeter(stream) {
     }
   };
 }
+function prettyDeviceLabel(raw) {
+  if (!raw) return null;
+  const cleaned = String(raw).replace(/^(default|communications)\s*[-–]\s*/i, "").replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "").trim();
+  return cleaned || null;
+}
 async function hasAudioInputDevice() {
   const md = globalThis.navigator?.mediaDevices;
   if (!md?.enumerateDevices) return null;
@@ -115,6 +120,16 @@ async function hasAudioInputDevice() {
   } catch {
     return null;
   }
+}
+function unmuteHint() {
+  const nav = globalThis.navigator;
+  const raw = `${nav?.userAgentData?.platform ?? ""} ${nav?.platform ?? ""} ${nav?.userAgent ?? ""}`.toLowerCase();
+  if (/android/.test(raw)) return "your device's sound settings";
+  if (/iphone|ipad|ipod/.test(raw)) return "Settings \u2192 Privacy & Security \u2192 Microphone";
+  if (/mac os|macintosh|macos/.test(raw)) return "System Settings \u2192 Sound \u2192 Input";
+  if (/windows|win32|win64/.test(raw)) return "Settings \u2192 System \u2192 Sound \u2192 Input";
+  if (/linux|x11|cros/.test(raw)) return "your system sound settings";
+  return "your system sound settings";
 }
 
 // src/ui/feedback/use-screen-recorder.ts
@@ -126,6 +141,11 @@ function pickMimeType() {
   }
   return "video/webm";
 }
+function micStateOf(stream) {
+  const track = stream.getAudioTracks()[0];
+  if (!track) return "no-device";
+  return track.muted ? "muted" : "live";
+}
 function useScreenRecorder() {
   const [status, setStatus] = useState2("idle");
   const [error, setError] = useState2(null);
@@ -134,6 +154,7 @@ function useScreenRecorder() {
   const [elapsedSec, setElapsedSec] = useState2(0);
   const [micState, setMicState] = useState2("live");
   const [micLevel, setMicLevel] = useState2(0);
+  const [micLabel, setMicLabel] = useState2(null);
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const streamsRef = useRef([]);
@@ -142,6 +163,7 @@ function useScreenRecorder() {
   const meterRef = useRef(nullMeter());
   const previewUrlRef = useRef(null);
   const sawSoundRef = useRef(false);
+  const preparedMicRef = useRef(null);
   useEffect(() => {
     let cancelled = false;
     void hasAudioInputDevice().then((has) => {
@@ -166,19 +188,43 @@ function useScreenRecorder() {
     meterRef.current = nullMeter();
     setMicLevel(0);
   }, []);
+  const prepareMic = useCallback2(async () => {
+    if (preparedMicRef.current) return micStateOf(preparedMicRef.current);
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      preparedMicRef.current = mic;
+      setMicLabel(prettyDeviceLabel(mic.getAudioTracks()[0]?.label));
+      const state = micStateOf(mic);
+      setMicState(state);
+      return state;
+    } catch (err) {
+      const name = err?.name;
+      const state = name === "NotAllowedError" || name === "SecurityError" ? "denied" : name === "NotFoundError" ? "no-device" : "unavailable";
+      setMicState(state);
+      return state;
+    }
+  }, []);
+  const discardMic = useCallback2(() => {
+    preparedMicRef.current?.getTracks().forEach((t) => t.stop());
+    preparedMicRef.current = null;
+  }, []);
   const start = useCallback2(async () => {
     setError(null);
     try {
       const display = await navigator.mediaDevices.getDisplayMedia(
         { video: true, audio: true, selfBrowserSurface: "include" }
       );
-      let mic = null;
-      try {
-        mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        setMicState("live");
-      } catch (err) {
-        const name = err?.name;
-        setMicState(name === "NotAllowedError" || name === "SecurityError" ? "denied" : name === "NotFoundError" ? "no-device" : "unavailable");
+      let mic = preparedMicRef.current;
+      preparedMicRef.current = null;
+      if (!mic) {
+        try {
+          mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+          setMicLabel(prettyDeviceLabel(mic.getAudioTracks()[0]?.label));
+          setMicState(micStateOf(mic));
+        } catch (err) {
+          const name = err?.name;
+          setMicState(name === "NotAllowedError" || name === "SecurityError" ? "denied" : name === "NotFoundError" ? "no-device" : "unavailable");
+        }
       }
       streamsRef.current = mic ? [display, mic] : [display];
       const tracks = [...display.getVideoTracks()];
@@ -187,7 +233,6 @@ function useScreenRecorder() {
       const combined = new MediaStream(tracks);
       const micTrack = mic?.getAudioTracks()[0];
       if (micTrack) {
-        if (micTrack.muted) setMicState("muted");
         micTrack.addEventListener("mute", () => setMicState("muted"));
         micTrack.addEventListener("unmute", () => setMicState("live"));
       }
@@ -229,6 +274,7 @@ function useScreenRecorder() {
     if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
   }, []);
   const reset = useCallback2(() => {
+    discardMic();
     cleanupStreams();
     if (previewUrlRef.current) {
       URL.revokeObjectURL(previewUrlRef.current);
@@ -241,11 +287,12 @@ function useScreenRecorder() {
     setElapsedSec(0);
     setError(null);
     setStatus("idle");
-  }, [cleanupStreams]);
+  }, [cleanupStreams, discardMic]);
   useEffect(() => () => {
+    discardMic();
     cleanupStreams();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-  }, [cleanupStreams]);
+  }, [cleanupStreams, discardMic]);
   return {
     status,
     error,
@@ -255,8 +302,11 @@ function useScreenRecorder() {
     start,
     stop,
     reset,
+    prepareMic,
+    discardMic,
     micState,
     micLevel,
+    micLabel,
     /** Did the finished take carry any sound? Sent with the submission so the
      *  backend can skip waiting for a transcript that can never exist. */
     hasAudio: () => sawSoundRef.current
@@ -354,22 +404,24 @@ var styles_default = `/* @mavenmm/ui feedback widget \u2014 self-contained, scop
 .mvui-fb-mode[data-active="true"] { background:#1e293b; color:#fff; }
 
 .mvui-fb-input { width:100%; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
-.mvui-fb-input::placeholder { color:#94a3b8; }
+.mvui-fb-input::placeholder { color:#64748b; }
 .mvui-fb-input:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
 .mvui-fb-textarea { width:100%; min-height:176px; resize:vertical; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
-.mvui-fb-textarea::placeholder { color:#94a3b8; }
+.mvui-fb-textarea::placeholder { color:#64748b; }
 .mvui-fb-textarea:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
 
 .mvui-fb-composer { border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; background:#fff; min-height:256px; max-height:48vh; overflow-y:auto; }
 .mvui-fb-prose { outline:none; font-size:16px; color:#0f172a; }
 .mvui-fb-prose p { margin:0 0 0.5em; }
 .mvui-fb-prose img { max-width:100%; height:auto; border-radius:4px; }
-.mvui-fb-prose p.is-editor-empty:first-child::before { content:attr(data-placeholder); color:#9ca3af; float:left; height:0; pointer-events:none; }
+.mvui-fb-prose p.is-editor-empty:first-child::before { content:attr(data-placeholder); color:#6b7280; float:left; height:0; pointer-events:none; }
 .mvui-fb-composer-tools { display:flex; align-items:center; gap:8px; margin-top:6px; }
 .mvui-fb-link { border:0; background:transparent; padding:0; font:inherit; font-size:14px; font-weight:500; color:#2563eb; cursor:pointer; }
 .mvui-fb-link:hover { color:#1d4ed8; }
 .mvui-fb-link:disabled { color:#94a3b8; cursor:default; }
-.mvui-fb-hint { font-size:14px; color:#94a3b8; }
+/* #94a3b8 on white was 2.6:1 \u2014 under the 4.5:1 minimum and genuinely hard to
+   read. #475569 is 7.5:1 and still clearly secondary to the body text. */
+.mvui-fb-hint { font-size:14px; color:#475569; }
 
 .mvui-fb-video-idle { border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px; padding:28px 20px; text-align:center; }
 .mvui-fb-video-idle .mvui-fb-hint { display:block; margin-top:8px; }
@@ -397,31 +449,47 @@ var styles_default = `/* @mavenmm/ui feedback widget \u2014 self-contained, scop
 .mvui-fb-pill-grip { cursor:move; user-select:none; padding:0 4px; color:#64748b; }
 .mvui-fb-pill-time { display:flex; align-items:center; gap:6px; font-size:16px; font-weight:600; color:#fb7185; }
 .mvui-fb-pill-dot { width:10px; height:10px; border-radius:9999px; background:#f43f5e; animation:mvui-fb-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
-.mvui-fb-pill-label { font-size:14px; color:#94a3b8; }
+.mvui-fb-pill-label { font-size:14px; color:#cbd5e1; }
 .mvui-fb-pill-stop { margin-left:auto; border:0; border-radius:6px; background:#e11d48; color:#fff; font:inherit; font-size:16px; padding:6px 14px; cursor:pointer; }
 .mvui-fb-pill-stop:hover { background:#f43f5e; }
 
 @keyframes mvui-fb-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
-/* Mic level meter \u2014 sits in the recording pill and the expanded recording row.
+/* Mic level meter \u2014 recording pill + expanded recording row.
    Four bars that move with the user's voice: a muted mic reads as four flat bars
    for the whole take, which is the only moment they can still fix it. */
-.mvui-fb-mic { display:inline-flex; align-items:flex-end; gap:2px; height:14px; }
+.mvui-fb-mic { display:inline-flex; align-items:center; gap:6px; min-width:0; flex:1; }
+.mvui-fb-mic-bars { display:inline-flex; align-items:flex-end; gap:2px; height:13px; flex:none; }
 .mvui-fb-mic-bar { width:3px; border-radius:1px; background:#334155; transition:background 80ms linear; }
 .mvui-fb-mic-bar[data-lit="true"] { background:#34d399; }
-.mvui-fb-mic-off { align-items:center; gap:4px; position:relative; font-size:11px; color:#fbbf24; }
-.mvui-fb-mic-slash { position:absolute; left:-1px; top:6px; width:13px; height:1.5px; background:#fbbf24; transform:rotate(-45deg); }
-.mvui-fb-mic-word { white-space:nowrap; }
+/* The device name is the ONLY thing allowed to shrink, so the bars stay readable
+   and Stop never gets pushed out of the pill by a verbose driver name. */
+/* On the dark pill, readable means lighter: #cbd5e1 is ~11:1 on #0f172a. */
+.mvui-fb-mic-name { font-size:11px; color:#cbd5e1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.mvui-fb-mic-name[data-dead="true"] { color:#fbbf24; }
+.mvui-fb-mic-icon { position:relative; font-size:12px; line-height:1; flex:none; }
+.mvui-fb-mic-icon-off { filter:grayscale(1) brightness(1.4); }
+.mvui-fb-mic-slash { position:absolute; left:-1px; top:6px; width:14px; height:1.5px; background:#fbbf24; transform:rotate(-45deg); }
 /* Amber, not red: a silent recording is a warning, not a failure \u2014 the video is
    still worth sending. Red here would read as "this is broken, stop". */
-.mvui-fb-mic-warn { color:#b45309; }
+.mvui-fb-mic-warn { color:#92400e; font-weight:500; }
+/* Stop must never be squeezed by the meter. */
+.mvui-fb-pill-stop { flex:none; }
+.mvui-fb-video-recording .mvui-fb-mic { flex:none; }
+.mvui-fb-video-recording .mvui-fb-mic-name { color:#334155; max-width:220px; }
+/* Pre-start "record without sound?" step. Inline in the panel, NOT a modal \u2014 it
+   replaces the idle pane the user is already looking at, so it reads as the next
+   step rather than an interruption. */
+.mvui-fb-video-confirm { border-color:#fcd34d; background:#fffbeb; text-align:left; }
+.mvui-fb-confirm-title { margin:0 0 6px; font-size:15px; font-weight:600; color:#92400e; }
+.mvui-fb-confirm-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }
 `;
 
 // src/ui/feedback/feedback-widget.tsx
 import { Fragment, jsx as jsx3, jsxs as jsxs2 } from "react/jsx-runtime";
 var FeedbackComposer = lazy(() => import("./feedback-composer-DHNFMEGW.js"));
 var PANEL_WIDTH = 1020;
-var PILL_WIDTH = 260;
+var PILL_WIDTH = 340;
 function mmss(total) {
   const m = Math.floor(total / 60);
   const s = total % 60;
@@ -433,19 +501,20 @@ function errorText(err, fallback) {
   return fallback;
 }
 var MIC_BARS = 4;
-function MicMeter({ level, state }) {
-  if (state !== "live") {
-    const why = state === "denied" ? "mic blocked" : state === "no-device" ? "no mic" : state === "muted" ? "mic muted" : "mic off";
-    return /* @__PURE__ */ jsxs2("span", { className: "mvui-fb-mic mvui-fb-mic-off", title: `${why} \u2014 this recording will have no narration`, children: [
-      /* @__PURE__ */ jsx3("span", { "aria-hidden": "true", children: "\u{1F399}" }),
-      /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-slash", "aria-hidden": "true" }),
-      /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-word", children: why })
-    ] });
-  }
-  return /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic", role: "img", "aria-label": `Microphone level ${Math.round(level * 100)}%`, children: Array.from({ length: MIC_BARS }, (_, i) => {
-    const lit = level >= (i + 1) / (MIC_BARS + 1);
-    return /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-bar", "data-lit": lit, style: { height: `${5 + i * 3}px` } }, i);
-  }) });
+function MicMeter({ level, state, label }) {
+  const dead = state !== "live";
+  const why = state === "denied" ? "Mic blocked" : state === "no-device" ? "No mic" : state === "muted" ? "Mic muted" : "Mic off";
+  const name = dead ? why : label;
+  return /* @__PURE__ */ jsxs2("span", { className: "mvui-fb-mic", title: dead ? `${why} \u2014 this recording will have no narration` : label ? `Recording from ${label}` : "Microphone level", children: [
+    dead ? /* @__PURE__ */ jsxs2("span", { className: "mvui-fb-mic-icon mvui-fb-mic-icon-off", "aria-hidden": "true", children: [
+      "\u{1F399}",
+      /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-slash" })
+    ] }) : /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-bars", role: "img", "aria-label": `Microphone level ${Math.round(level * 100)}%`, children: Array.from({ length: MIC_BARS }, (_, i) => {
+      const lit = level >= (i + 1) / (MIC_BARS + 1);
+      return /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-bar", "data-lit": lit, style: { height: `${4 + i * 3}px` } }, i);
+    }) }),
+    name && /* @__PURE__ */ jsx3("span", { className: "mvui-fb-mic-name", "data-dead": dead, children: name })
+  ] });
 }
 function FeedbackWidget() {
   const { isOpen, close, config } = useFeedback();
@@ -470,6 +539,7 @@ function FeedbackWidget() {
   const [result, setResult] = useState3(null);
   const [composerKey, setComposerKey] = useState3(0);
   const [topic, setTopic] = useState3(null);
+  const [confirmSilent, setConfirmSilent] = useState3(false);
   const recorder = useScreenRecorder();
   const [pos, setPos] = useState3(null);
   const drag = useRef2(null);
@@ -519,6 +589,7 @@ function FeedbackWidget() {
     window.removeEventListener("mouseup", onUp);
   }, [onMove, onUp]);
   function resetForm() {
+    setConfirmSilent(false);
     setSubject("");
     setBodyHtml("");
     setPlainBody("");
@@ -538,6 +609,14 @@ function FeedbackWidget() {
     if (next === "write") recorder.reset();
     setResult(null);
     setMode(next);
+  }
+  async function handleStartClicked() {
+    const state = await recorder.prepareMic();
+    if (state === "live") {
+      void recorder.start();
+      return;
+    }
+    setConfirmSilent(true);
   }
   const autoContext = () => ({
     pageUrl: window.location.href,
@@ -600,8 +679,7 @@ function FeedbackWidget() {
           /* @__PURE__ */ jsx3("span", { className: "mvui-fb-pill-dot" }),
           mmss(recorder.elapsedSec)
         ] }),
-        /* @__PURE__ */ jsx3(MicMeter, { level: recorder.micLevel, state: recorder.micState }),
-        /* @__PURE__ */ jsx3("span", { className: "mvui-fb-pill-label", children: "recording\u2026" }),
+        /* @__PURE__ */ jsx3(MicMeter, { level: recorder.micLevel, state: recorder.micState, label: recorder.micLabel }),
         /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-pill-stop", onClick: recorder.stop, children: "Stop" })
       ] }),
       shadowEl
@@ -638,7 +716,24 @@ function FeedbackWidget() {
         /* @__PURE__ */ jsx3("div", { className: "mvui-fb-types", children: FEEDBACK_TYPES.map((t) => /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-type", "data-active": type === t.value, onClick: () => setType(t.value), children: t.label }, t.value)) }),
         enableVideo && /* @__PURE__ */ jsx3("div", { className: "mvui-fb-modes", children: ["write", "video"].map((m) => /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-mode", "data-active": mode === m, onClick: () => switchMode(m), children: m === "write" ? "Write" : "Record video" }, m)) }),
         /* @__PURE__ */ jsx3("input", { className: "mvui-fb-input", type: "text", value: subject, onChange: (e) => setSubject(e.target.value), placeholder: "One-line summary" }),
-        mode === "write" ? enableRichText ? /* @__PURE__ */ jsx3(Suspense, { fallback: /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint", children: "Loading editor\u2026" }), children: /* @__PURE__ */ jsx3(FeedbackComposer, { uploadImage: transport.uploadImage, onChange: (html) => setBodyHtml(html) }, composerKey) }) : /* @__PURE__ */ jsx3("textarea", { className: "mvui-fb-textarea", value: plainBody, onChange: (e) => setPlainBody(e.target.value), placeholder: "What happened? What did you expect?" }) : /* @__PURE__ */ jsx3(VideoPane, { recorder, uploadProgress, submitting }),
+        mode === "write" ? enableRichText ? /* @__PURE__ */ jsx3(Suspense, { fallback: /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint", children: "Loading editor\u2026" }), children: /* @__PURE__ */ jsx3(FeedbackComposer, { uploadImage: transport.uploadImage, onChange: (html) => setBodyHtml(html) }, composerKey) }) : /* @__PURE__ */ jsx3("textarea", { className: "mvui-fb-textarea", value: plainBody, onChange: (e) => setPlainBody(e.target.value), placeholder: "What happened? What did you expect?" }) : /* @__PURE__ */ jsx3(
+          VideoPane,
+          {
+            recorder,
+            uploadProgress,
+            submitting,
+            confirmSilent,
+            onStartClicked: handleStartClicked,
+            onCancelConfirm: () => {
+              setConfirmSilent(false);
+              recorder.discardMic();
+            },
+            onConfirmSilent: () => {
+              setConfirmSilent(false);
+              void recorder.start();
+            }
+          }
+        ),
         result && !result.ok && /* @__PURE__ */ jsx3("p", { className: "mvui-fb-err", children: result.error }),
         /* @__PURE__ */ jsxs2("div", { className: "mvui-fb-actions", children: [
           /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-cancel", onClick: handleClose, children: "Cancel" }),
@@ -649,14 +744,14 @@ function FeedbackWidget() {
     shadowEl
   );
 }
-function VideoPane({ recorder, uploadProgress, submitting }) {
+function VideoPane({ recorder, uploadProgress, submitting, confirmSilent, onStartClicked, onCancelConfirm, onConfirmSilent }) {
   if (recorder.status === "recording") {
     return /* @__PURE__ */ jsxs2("div", { className: "mvui-fb-video-recording", children: [
       /* @__PURE__ */ jsxs2("span", { className: "mvui-fb-pill-time", children: [
         /* @__PURE__ */ jsx3("span", { className: "mvui-fb-pill-dot" }),
         mmss(recorder.elapsedSec)
       ] }),
-      /* @__PURE__ */ jsx3(MicMeter, { level: recorder.micLevel, state: recorder.micState }),
+      /* @__PURE__ */ jsx3(MicMeter, { level: recorder.micLevel, state: recorder.micState, label: recorder.micLabel }),
       /* @__PURE__ */ jsx3("span", { className: "mvui-fb-hint", children: "Recording\u2026 drive the app, then click Stop." }),
       /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-pill-stop", onClick: recorder.stop, children: "Stop" })
     ] });
@@ -674,11 +769,27 @@ function VideoPane({ recorder, uploadProgress, submitting }) {
       ] })
     ] });
   }
+  if (confirmSilent) {
+    return /* @__PURE__ */ jsxs2("div", { className: "mvui-fb-video-idle mvui-fb-video-confirm", children: [
+      /* @__PURE__ */ jsx3("p", { className: "mvui-fb-confirm-title", children: recorder.micState === "no-device" ? "No microphone detected." : recorder.micState === "muted" ? `Your microphone is muted${recorder.micLabel ? ` (${recorder.micLabel})` : ""}.` : recorder.micState === "denied" ? "Microphone access is blocked for this site." : "Your microphone isn't available." }),
+      /* @__PURE__ */ jsxs2("p", { className: "mvui-fb-hint", children: [
+        "This recording will have ",
+        /* @__PURE__ */ jsx3("strong", { children: "no narration" }),
+        " \u2014 no voice, and no AI summary.",
+        recorder.micState === "denied" && " To fix it: click the padlock in the address bar \u2192 Microphone \u2192 Allow, then start again.",
+        recorder.micState === "muted" && ` Unmute it \u2014 check any hardware switch on your mic or headset, or ${unmuteHint()} \u2014 then start again.`
+      ] }),
+      /* @__PURE__ */ jsxs2("div", { className: "mvui-fb-confirm-actions", children: [
+        /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-cancel", onClick: onCancelConfirm, children: "Let me fix the mic" }),
+        /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-send", onClick: onConfirmSilent, children: "Record without sound" })
+      ] })
+    ] });
+  }
   return /* @__PURE__ */ jsxs2("div", { className: "mvui-fb-video-idle", children: [
-    /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-send", onClick: recorder.start, children: "\u23FA Start recording" }),
+    /* @__PURE__ */ jsx3("button", { type: "button", className: "mvui-fb-send", onClick: onStartClicked, children: "\u23FA Start recording" }),
     /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint", children: "Captures a tab/window + your mic. The widget shrinks to a small pill while recording; click Stop when done." }),
     recorder.micState === "no-device" && /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint mvui-fb-mic-warn", children: "No microphone detected \u2014 this recording will have no sound." }),
-    recorder.micState === "denied" && /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint mvui-fb-mic-warn", children: "Microphone access is blocked, so the recording will be silent. Allow it in your browser's site settings to narrate." }),
+    recorder.micState === "denied" && /* @__PURE__ */ jsx3("p", { className: "mvui-fb-hint mvui-fb-mic-warn", children: "Microphone access is blocked, so the recording will be silent." }),
     recorder.error && /* @__PURE__ */ jsx3("p", { className: "mvui-fb-err", children: recorder.error })
   ] });
 }

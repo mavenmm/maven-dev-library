@@ -3,12 +3,12 @@ import { createPortal } from "react-dom";
 import { useFeedback, FEEDBACK_TYPES, type FeedbackType, type FeedbackTopic, type FeedbackContextMeta, type FeedbackSubmitResult } from "./feedback-config";
 const FeedbackComposer = lazy(() => import("./feedback-composer"));
 import { useScreenRecorder } from "./use-screen-recorder";
-import type { MicState } from "./mic-level";
+import { unmuteHint, type MicState } from "./mic-level";
 import { uploadToVimeoTus } from "./upload-video";
 import widgetCss from "../styles.css";
 
 const PANEL_WIDTH = 1020; // matches copydeck; clamped to viewport−32 below
-const PILL_WIDTH = 260;
+const PILL_WIDTH = 340; // room for the mic meter + device name without crowding Stop
 type Mode = "write" | "video";
 
 function mmss(total: number): string {
@@ -39,25 +39,28 @@ const MIC_BARS = 4;
  * about it. When the mic is definitely unusable we say so in words instead,
  * because there is nothing to meter.
  */
-function MicMeter({ level, state }: { level: number; state: MicState }) {
-  if (state !== "live") {
-    const why = state === "denied" ? "mic blocked" : state === "no-device" ? "no mic" : state === "muted" ? "mic muted" : "mic off";
-    return (
-      <span className="mvui-fb-mic mvui-fb-mic-off" title={`${why} — this recording will have no narration`}>
-        <span aria-hidden="true">🎙</span>
-        <span className="mvui-fb-mic-slash" aria-hidden="true" />
-        <span className="mvui-fb-mic-word">{why}</span>
-      </span>
-    );
-  }
+function MicMeter({ level, state, label }: { level: number; state: MicState; label: string | null }) {
+  const dead = state !== "live";
+  const why = state === "denied" ? "Mic blocked" : state === "no-device" ? "No mic" : state === "muted" ? "Mic muted" : "Mic off";
+  // The device name is the flexible part: it truncates so the meter and the Stop
+  // button keep their space no matter how baroque the driver's name is
+  // ("Default - Rondie's AirPods Pro (b58e:9e84)").
+  const name = dead ? why : label;
   return (
-    <span className="mvui-fb-mic" role="img" aria-label={`Microphone level ${Math.round(level * 100)}%`}>
-      {Array.from({ length: MIC_BARS }, (_, i) => {
-        // Each bar lights at a higher threshold, so the meter reads as loudness
-        // rather than all four twitching together.
-        const lit = level >= (i + 1) / (MIC_BARS + 1);
-        return <span key={i} className="mvui-fb-mic-bar" data-lit={lit} style={{ height: `${5 + i * 3}px` }} />;
-      })}
+    <span className="mvui-fb-mic" title={dead ? `${why} — this recording will have no narration` : label ? `Recording from ${label}` : "Microphone level"}>
+      {dead ? (
+        <span className="mvui-fb-mic-icon mvui-fb-mic-icon-off" aria-hidden="true">🎙<span className="mvui-fb-mic-slash" /></span>
+      ) : (
+        <span className="mvui-fb-mic-bars" role="img" aria-label={`Microphone level ${Math.round(level * 100)}%`}>
+          {Array.from({ length: MIC_BARS }, (_, i) => {
+            // Each bar lights at a higher threshold, so the meter reads as loudness
+            // rather than all four twitching together.
+            const lit = level >= (i + 1) / (MIC_BARS + 1);
+            return <span key={i} className="mvui-fb-mic-bar" data-lit={lit} style={{ height: `${4 + i * 3}px` }} />;
+          })}
+        </span>
+      )}
+      {name && <span className="mvui-fb-mic-name" data-dead={dead}>{name}</span>}
     </span>
   );
 }
@@ -87,6 +90,9 @@ export function FeedbackWidget() {
   const [result, setResult] = useState<FeedbackSubmitResult | null>(null);
   const [composerKey, setComposerKey] = useState(0);
   const [topic, setTopic] = useState<FeedbackTopic | null>(null);
+  // Showing the "record without sound?" step. Only reachable when the mic is
+  // definitely unusable — see certainlySilent in VideoPane.
+  const [confirmSilent, setConfirmSilent] = useState(false);
 
   const recorder = useScreenRecorder();
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -133,12 +139,20 @@ export function FeedbackWidget() {
   }, [pos, onMove, onUp]);
   useEffect(() => () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); }, [onMove, onUp]);
 
-  function resetForm() { setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); setTopic(null); recorder.reset(); }
+  function resetForm() { setConfirmSilent(false); setSubject(""); setBodyHtml(""); setPlainBody(""); setResult(null); setUploadProgress(null); setComposerKey((k) => k + 1); setTopic(null); recorder.reset(); }
   function handleClose() { resetForm(); setMode(defaultMode); close(); }
   function switchMode(next: Mode) {
     if (recorder.status === "recording") return;
     if (next === "write") recorder.reset();
     setResult(null); setMode(next);
+  }
+
+  // Ask the mic what it is BEFORE opening the screen picker, so a muted or
+  // missing mic can be flagged while cancelling still costs the user nothing.
+  async function handleStartClicked() {
+    const state = await recorder.prepareMic();
+    if (state === "live") { void recorder.start(); return; }
+    setConfirmSilent(true);
   }
 
   const autoContext = (): FeedbackContextMeta => ({
@@ -185,8 +199,7 @@ export function FeedbackWidget() {
       <div className="mvui-fb-pill" style={{ top: pos.top, left: pos.left, width: PILL_WIDTH, zIndex: z }}>
         <span className="mvui-fb-pill-grip" onMouseDown={onDown} title="Drag">⠿</span>
         <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
-        <MicMeter level={recorder.micLevel} state={recorder.micState} />
-        <span className="mvui-fb-pill-label">recording…</span>
+        <MicMeter level={recorder.micLevel} state={recorder.micState} label={recorder.micLabel} />
         <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
       </div>,
       shadowEl,
@@ -255,7 +268,15 @@ export function FeedbackWidget() {
                 <textarea className="mvui-fb-textarea" value={plainBody} onChange={(e) => setPlainBody(e.target.value)} placeholder="What happened? What did you expect?" />
               )
             ) : (
-              <VideoPane recorder={recorder} uploadProgress={uploadProgress} submitting={submitting} />
+              <VideoPane
+                recorder={recorder}
+                uploadProgress={uploadProgress}
+                submitting={submitting}
+                confirmSilent={confirmSilent}
+                onStartClicked={handleStartClicked}
+                onCancelConfirm={() => { setConfirmSilent(false); recorder.discardMic(); }}
+                onConfirmSilent={() => { setConfirmSilent(false); void recorder.start(); }}
+              />
             )}
 
             {result && !result.ok && <p className="mvui-fb-err">{result.error}</p>}
@@ -274,13 +295,13 @@ export function FeedbackWidget() {
   );
 }
 
-function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnType<typeof useScreenRecorder>; uploadProgress: number | null; submitting: boolean; }) {
+function VideoPane({ recorder, uploadProgress, submitting, confirmSilent, onStartClicked, onCancelConfirm, onConfirmSilent }: { recorder: ReturnType<typeof useScreenRecorder>; uploadProgress: number | null; submitting: boolean; confirmSilent: boolean; onStartClicked: () => void; onCancelConfirm: () => void; onConfirmSilent: () => void; }) {
   // Shown only when collapseWhileRecording=false (otherwise the panel is a pill while recording).
   if (recorder.status === "recording") {
     return (
       <div className="mvui-fb-video-recording">
         <span className="mvui-fb-pill-time"><span className="mvui-fb-pill-dot" />{mmss(recorder.elapsedSec)}</span>
-        <MicMeter level={recorder.micLevel} state={recorder.micState} />
+        <MicMeter level={recorder.micLevel} state={recorder.micState} label={recorder.micLabel} />
         <span className="mvui-fb-hint">Recording… drive the app, then click Stop.</span>
         <button type="button" className="mvui-fb-pill-stop" onClick={recorder.stop}>Stop</button>
       </div>
@@ -297,16 +318,53 @@ function VideoPane({ recorder, uploadProgress, submitting }: { recorder: ReturnT
       </div>
     );
   }
+  // Gate the START, never the Send. Once someone has narrated for five minutes the
+  // recording is worth filing whatever the audio did — but one click BEFORE they
+  // begin costs a second and can save the whole take (Rondie, 2026-08-07).
+  //
+  // Fires only on states the browser tells us are CERTAIN: no input device,
+  // permission refused, or the track reporting itself muted. Never on suspicion —
+  // a live mic whose owner simply hasn't spoken yet is indistinguishable from a
+  // quiet one, and nagging every recording would get the warning dismissed on
+  // reflex. That residual case stays the meter's job.
+
+  if (confirmSilent) {
+    return (
+      <div className="mvui-fb-video-idle mvui-fb-video-confirm">
+        <p className="mvui-fb-confirm-title">
+          {recorder.micState === "no-device"
+            ? "No microphone detected."
+            : recorder.micState === "muted"
+              ? `Your microphone is muted${recorder.micLabel ? ` (${recorder.micLabel})` : ""}.`
+              : recorder.micState === "denied"
+                ? "Microphone access is blocked for this site."
+                : "Your microphone isn't available."}
+        </p>
+        <p className="mvui-fb-hint">
+          This recording will have <strong>no narration</strong> — no voice, and no AI summary.
+          {recorder.micState === "denied" && " To fix it: click the padlock in the address bar → Microphone → Allow, then start again."}
+          {recorder.micState === "muted" && ` Unmute it — check any hardware switch on your mic or headset, or ${unmuteHint()} — then start again.`}
+        </p>
+        <div className="mvui-fb-confirm-actions">
+          <button type="button" className="mvui-fb-cancel" onClick={onCancelConfirm}>Let me fix the mic</button>
+          <button type="button" className="mvui-fb-send" onClick={onConfirmSilent}>Record without sound</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mvui-fb-video-idle">
-      <button type="button" className="mvui-fb-send" onClick={recorder.start}>⏺ Start recording</button>
+      <button type="button" className="mvui-fb-send" onClick={onStartClicked}>⏺ Start recording</button>
       <p className="mvui-fb-hint">Captures a tab/window + your mic. The widget shrinks to a small pill while recording; click Stop when done.</p>
-      {/* Said BEFORE they record, not after — the only point at which it saves them anything. */}
+      {/* No device name here on purpose. When the mic is fine it's noise in a pane
+          the user reads every time; it earns its place only where it answers a
+          question — in the pill while recording, and in the confirm when muted. */}
       {recorder.micState === "no-device" && (
         <p className="mvui-fb-hint mvui-fb-mic-warn">No microphone detected — this recording will have no sound.</p>
       )}
       {recorder.micState === "denied" && (
-        <p className="mvui-fb-hint mvui-fb-mic-warn">Microphone access is blocked, so the recording will be silent. Allow it in your browser's site settings to narrate.</p>
+        <p className="mvui-fb-hint mvui-fb-mic-warn">Microphone access is blocked, so the recording will be silent.</p>
       )}
       {recorder.error && <p className="mvui-fb-err">{recorder.error}</p>}
     </div>
