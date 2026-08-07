@@ -38,22 +38,24 @@
 .mvui-fb-mode[data-active="true"] { background:#1e293b; color:#fff; }
 
 .mvui-fb-input { width:100%; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
-.mvui-fb-input::placeholder { color:#94a3b8; }
+.mvui-fb-input::placeholder { color:#64748b; }
 .mvui-fb-input:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
 .mvui-fb-textarea { width:100%; min-height:176px; resize:vertical; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; font:inherit; font-size:16px; color:#0f172a; background:#fff; text-align:left; }
-.mvui-fb-textarea::placeholder { color:#94a3b8; }
+.mvui-fb-textarea::placeholder { color:#64748b; }
 .mvui-fb-textarea:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 1px #3b82f6; }
 
 .mvui-fb-composer { border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; background:#fff; min-height:256px; max-height:48vh; overflow-y:auto; }
 .mvui-fb-prose { outline:none; font-size:16px; color:#0f172a; }
 .mvui-fb-prose p { margin:0 0 0.5em; }
 .mvui-fb-prose img { max-width:100%; height:auto; border-radius:4px; }
-.mvui-fb-prose p.is-editor-empty:first-child::before { content:attr(data-placeholder); color:#9ca3af; float:left; height:0; pointer-events:none; }
+.mvui-fb-prose p.is-editor-empty:first-child::before { content:attr(data-placeholder); color:#6b7280; float:left; height:0; pointer-events:none; }
 .mvui-fb-composer-tools { display:flex; align-items:center; gap:8px; margin-top:6px; }
 .mvui-fb-link { border:0; background:transparent; padding:0; font:inherit; font-size:14px; font-weight:500; color:#2563eb; cursor:pointer; }
 .mvui-fb-link:hover { color:#1d4ed8; }
 .mvui-fb-link:disabled { color:#94a3b8; cursor:default; }
-.mvui-fb-hint { font-size:14px; color:#94a3b8; }
+/* #94a3b8 on white was 2.6:1 — under the 4.5:1 minimum and genuinely hard to
+   read. #475569 is 7.5:1 and still clearly secondary to the body text. */
+.mvui-fb-hint { font-size:14px; color:#475569; }
 
 .mvui-fb-video-idle { border:1px dashed #93c5fd; background:#eff6ff; border-radius:10px; padding:28px 20px; text-align:center; }
 .mvui-fb-video-idle .mvui-fb-hint { display:block; margin-top:8px; }
@@ -81,8 +83,37 @@
 .mvui-fb-pill-grip { cursor:move; user-select:none; padding:0 4px; color:#64748b; }
 .mvui-fb-pill-time { display:flex; align-items:center; gap:6px; font-size:16px; font-weight:600; color:#fb7185; }
 .mvui-fb-pill-dot { width:10px; height:10px; border-radius:9999px; background:#f43f5e; animation:mvui-fb-pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
-.mvui-fb-pill-label { font-size:14px; color:#94a3b8; }
+.mvui-fb-pill-label { font-size:14px; color:#cbd5e1; }
 .mvui-fb-pill-stop { margin-left:auto; border:0; border-radius:6px; background:#e11d48; color:#fff; font:inherit; font-size:16px; padding:6px 14px; cursor:pointer; }
 .mvui-fb-pill-stop:hover { background:#f43f5e; }
 
 @keyframes mvui-fb-pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+/* Mic level meter — recording pill + expanded recording row.
+   Four bars that move with the user's voice: a muted mic reads as four flat bars
+   for the whole take, which is the only moment they can still fix it. */
+.mvui-fb-mic { display:inline-flex; align-items:center; gap:6px; min-width:0; flex:1; }
+.mvui-fb-mic-bars { display:inline-flex; align-items:flex-end; gap:2px; height:13px; flex:none; }
+.mvui-fb-mic-bar { width:3px; border-radius:1px; background:#334155; transition:background 80ms linear; }
+.mvui-fb-mic-bar[data-lit="true"] { background:#34d399; }
+/* The device name is the ONLY thing allowed to shrink, so the bars stay readable
+   and Stop never gets pushed out of the pill by a verbose driver name. */
+/* On the dark pill, readable means lighter: #cbd5e1 is ~11:1 on #0f172a. */
+.mvui-fb-mic-name { font-size:11px; color:#cbd5e1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.mvui-fb-mic-name[data-dead="true"] { color:#fbbf24; }
+.mvui-fb-mic-icon { position:relative; font-size:12px; line-height:1; flex:none; }
+.mvui-fb-mic-icon-off { filter:grayscale(1) brightness(1.4); }
+.mvui-fb-mic-slash { position:absolute; left:-1px; top:6px; width:14px; height:1.5px; background:#fbbf24; transform:rotate(-45deg); }
+/* Amber, not red: a silent recording is a warning, not a failure — the video is
+   still worth sending. Red here would read as "this is broken, stop". */
+.mvui-fb-mic-warn { color:#92400e; font-weight:500; }
+/* Stop must never be squeezed by the meter. */
+.mvui-fb-pill-stop { flex:none; }
+.mvui-fb-video-recording .mvui-fb-mic { flex:none; }
+.mvui-fb-video-recording .mvui-fb-mic-name { color:#334155; max-width:220px; }
+/* Pre-start "record without sound?" step. Inline in the panel, NOT a modal — it
+   replaces the idle pane the user is already looking at, so it reads as the next
+   step rather than an interruption. */
+.mvui-fb-video-confirm { border-color:#fcd34d; background:#fffbeb; text-align:left; }
+.mvui-fb-confirm-title { margin:0 0 6px; font-size:15px; font-weight:600; color:#92400e; }
+.mvui-fb-confirm-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:16px; }

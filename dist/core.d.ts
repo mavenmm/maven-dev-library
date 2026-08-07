@@ -164,6 +164,13 @@ interface SubmitVideoInput {
     subject: string;
     videoId: string;
     videoUri: string;
+    /**
+     * Whether the recording carried any sound (the widget measures it live).
+     * `false` means no narration was captured, so Vimeo can never produce
+     * auto-captions — the video is NOT queued for summarisation at all. Omitted by
+     * older clients, which keeps today's optimistic behaviour of queueing anyway.
+     */
+    hasAudio?: boolean;
     /** Optional human-readable area/category (shown in the task), e.g. "Agentic feature". */
     topicLabel?: string;
     pageUrl: string;

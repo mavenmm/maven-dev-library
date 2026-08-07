@@ -35,9 +35,16 @@ export async function submitVideoFeedback(cfg: FeedbackConfig, secrets: Secrets,
   const tw = cfg.teamwork;
   const token = secrets.teamworkToken;
   const watch = vimeoWatchUrl(input.videoId);
+  // A recording with no sound can never be transcribed, so promising a summary
+  // would be a lie that takes ~80 minutes of polling to retract. Say so now, and
+  // skip the queue entirely (see the `pending` decision below).
+  const silent = input.hasAudio === false;
+  const summaryNote = silent
+    ? `<p>🔇 <em>No audio was captured in this recording, so there's no AI summary — please watch the video.</em></p>`
+    : `<p>🤖 <em>AI summary pending — added automatically once the transcript is ready.</em></p>`;
   const commentHtml =
     `<p>🎥 <strong>Screen recording:</strong> <a href="${escapeHtml(watch)}">${escapeHtml(watch)}</a></p>` +
-    `<p>🤖 <em>AI summary pending — added automatically once the transcript is ready.</em></p>` +
+    summaryNote +
     buildContextHtml(submitter, { appName: cfg.appName, pageUrl: input.pageUrl, pageTitle: input.pageTitle, userAgent: input.userAgent, viewport: input.viewport, topicLabel: input.topicLabel });
 
   const warnings: WarningSink = [];
@@ -64,7 +71,12 @@ export async function submitVideoFeedback(cfg: FeedbackConfig, secrets: Secrets,
   if (tw.soleFollowerId) await setSoleFollower(tw, token, taskId, tw.soleFollowerId, warnings);
   if (secrets.vimeoToken && cfg.vimeo?.folderId) await moveVideoToFolder(secrets.vimeoToken, input.videoId, cfg.vimeo.folderId, warnings);
 
-  const pending: PendingVideo = { taskId, videoId: input.videoId, videoUri: input.videoUri };
+  // No pending descriptor for a silent take: nothing to wait for, so the poller
+  // never claims it, never burns its attempt budget, and never files the
+  // "transcript wasn't available in time" note on a video that had no speech.
+  const pending: PendingVideo | undefined = silent
+    ? undefined
+    : { taskId, videoId: input.videoId, videoUri: input.videoUri };
   return {
     result: {
       ok: true,
@@ -72,7 +84,7 @@ export async function submitVideoFeedback(cfg: FeedbackConfig, secrets: Secrets,
       url: teamworkTaskUrl(tw, taskId),
       ...(warnings.length ? { warnings: warnings.map((w) => w.message) } : {}),
     },
-    pending,
+    ...(pending ? { pending } : {}),
   };
 }
 
