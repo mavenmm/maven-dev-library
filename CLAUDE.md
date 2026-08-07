@@ -73,6 +73,33 @@ Sanity check before pushing the tag: `git show vX.Y.Z --stat | grep dist/` — i
 changed `src/` but no `dist/` files appear, the build step was skipped. Consumers pin the tag and
 bump explicitly (no semver ranges with git deps).
 
+## Consumers & rollout
+
+`consumers.json` is the **single source of truth** for who installs this library — id, repo
+URL, path, which subdirectory holds the `package.json`, default branch (three are `master`,
+three are `main`), and how each one deploys. Adding an app? Add it there, not to a script.
+
+```bash
+./scripts/consumers.sh            # who's on what: pinned vs installed vs latest tag
+./scripts/rollout.sh v0.7.0       # dry run over every app
+./scripts/rollout.sh v0.7.0 paab --apply   # branch, bump, verify, push, open a PR
+```
+
+`rollout.sh` **stops at an open PR by design.** Every app deploys on merge, so a script that
+fans six production deploys out of one command is a bad trade for the two minutes it saves.
+What it does automate is the part that has actually gone wrong: it refuses a dirty or
+wrong-branch checkout, forces npm to re-resolve the tag, and then **verifies the new code is
+really on disk** — both the version *and* a content marker in `dist/ui.js`, because this
+package ships a committed `dist/` and a tag can carry a stale build.
+
+Two failures worth knowing, both of which have bitten production:
+- **`npm install` after bumping a `#tag` does not reliably re-resolve.** package.json says the
+  new version while `node_modules` keeps the old one. `consumers.sh` flags this as
+  LOCKFILE-DRIFT; `rollout.sh` fails loudly rather than committing it.
+- **`VITE_FEEDBACK_RICHTEXT` / `VITE_FEEDBACK_VIDEO` are build-time.** Unset in a site's build
+  env means the widget ships text-only with no error anywhere. Scripts can't read Netlify env,
+  so this stays a manual pre-merge check.
+
 ## Gotchas
 - **Consumer CI install is via `GIT_CONFIG_PARAMETERS`, NOT a `preinstall` script.** This is a private
   git dep; npm clones it over SSH, and Netlify's build bot has no SSH key → cold builds fail with
