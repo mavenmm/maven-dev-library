@@ -19,25 +19,28 @@ describe("createTextFeedback", () => {
   it("rejects an empty subject without hitting the network", async () => {
     const f = vi.fn(); vi.stubGlobal("fetch", f);
     const res = await createTextFeedback(cfg, { teamworkToken: "T" }, { type: "bug", subject: "  ", pageUrl: "https://h" }, {});
-    expect(res).toEqual({ ok: false, error: expect.stringContaining("subject") });
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining("subject") });
     expect(f).not.toHaveBeenCalled();
   });
   it("creates task + comment + stage; skips follower when soleFollowerId unset", async () => {
-    const { fn, seen } = sequenceFetch([{ ok: true, body: JSON.stringify({ id: 777 }) }, { ok: true }, { ok: true }]);
+    // create → comment → PUT stage → GET stage read-back (a 200 on the PUT is not
+    // proof Teamwork honoured the stage, so it is verified).
+    const { fn, seen } = sequenceFetch([{ ok: true, body: JSON.stringify({ id: 777 }) }, { ok: true }, { ok: true }, { ok: true }]);
     vi.stubGlobal("fetch", fn);
     const res = await createTextFeedback(cfg, { teamworkToken: "T" }, { type: "bug", subject: "Broken link", bodyHtml: "<p>x</p>", pageUrl: "https://h/x" }, { name: "Rondie" });
     expect(res).toEqual({ ok: true, taskId: "777", url: "https://mavenmm.teamwork.com/app/tasks/777" });
-    expect(seen).toHaveLength(3);
+    expect(seen).toHaveLength(4);
     expect(seen[1]).toContain("/tasks/777/comments.json");
+    expect(seen[2]).toBe("https://mavenmm.teamwork.com/tasks/777.json");
   });
   it("runs follower cleanup when soleFollowerId set (copydeck case)", async () => {
-    const { fn, seen } = sequenceFetch([{ ok: true, body: JSON.stringify({ id: 1 }) }, { ok: true }, { ok: true }, { ok: true }]);
+    const { fn, seen } = sequenceFetch([{ ok: true, body: JSON.stringify({ id: 1 }) }, { ok: true }, { ok: true }, { ok: true }, { ok: true }]);
     vi.stubGlobal("fetch", fn);
     const cfg2: FeedbackConfig = { ...cfg, teamwork: { ...cfg.teamwork, soleFollowerId: "100" } };
     const res = await createTextFeedback(cfg2, { teamworkToken: "T" }, { type: "other", subject: "x", pageUrl: "https://h" }, {});
     expect(res.ok).toBe(true);
-    expect(seen).toHaveLength(4);
-    expect(seen[3]).toContain("/projects/api/v3/tasks/1.json");
+    expect(seen).toHaveLength(5); // + the stage read-back
+    expect(seen[4]).toContain("/projects/api/v3/tasks/1.json");
   });
   it("returns ok:false when creation throws", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, text: async () => "boom" }) as any));

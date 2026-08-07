@@ -293,19 +293,51 @@ function useScreenRecorder() {
 
 // src/ui/feedback/upload-video.ts
 var import_tus_js_client = require("tus-js-client");
+var VideoUploadError = class _VideoUploadError extends Error {
+  constructor(message, opts = {}) {
+    super(message);
+    this.name = "VideoUploadError";
+    this.httpStatus = opts.httpStatus;
+    this.responseBody = opts.responseBody;
+    this.cause = opts.cause;
+    Object.setPrototypeOf(this, _VideoUploadError.prototype);
+  }
+};
+function describeTusError(err) {
+  const detailed = err;
+  const res = detailed?.originalResponse;
+  const httpStatus = typeof res?.getStatus === "function" ? res.getStatus() : void 0;
+  let responseBody;
+  try {
+    responseBody = typeof res?.getBody === "function" ? String(res.getBody()).slice(0, 300) : void 0;
+  } catch {
+    responseBody = void 0;
+  }
+  const base = err instanceof Error ? err.message : String(err);
+  const suffix = httpStatus ? ` (HTTP ${httpStatus}${responseBody ? ` \u2014 ${responseBody}` : ""})` : "";
+  return new VideoUploadError(`Vimeo upload failed: ${base}${suffix}`, { httpStatus, responseBody, cause: err });
+}
 function uploadToVimeoTus(uploadLink, file, onProgress) {
   return new Promise((resolve, reject) => {
+    if (!uploadLink) {
+      reject(new VideoUploadError("Vimeo upload failed: no upload link was issued."));
+      return;
+    }
     const upload = new import_tus_js_client.Upload(file, {
       uploadUrl: uploadLink,
       retryDelays: [0, 1e3, 3e3, 5e3, 1e4],
       metadata: { filename: "feedback-recording.webm", filetype: "video/webm" },
-      onError: (err) => reject(err),
+      onError: (err) => reject(describeTusError(err)),
       onProgress: (sent, total) => {
         if (onProgress && total > 0) onProgress(sent / total);
       },
       onSuccess: () => resolve()
     });
-    upload.start();
+    try {
+      upload.start();
+    } catch (err) {
+      reject(describeTusError(err));
+    }
   });
 }
 
@@ -409,6 +441,11 @@ function mmss(total) {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+function errorText(err, fallback) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err) return err;
+  return fallback;
 }
 function FeedbackWidget() {
   const { isOpen, close, config } = useFeedback();
@@ -527,7 +564,7 @@ function FeedbackWidget() {
         setComposerKey((k) => k + 1);
       }
     } catch (err) {
-      setResult({ ok: false, error: err.message });
+      setResult({ ok: false, error: errorText(err, "Couldn't send your feedback. Please try again.") });
     } finally {
       setSubmitting(false);
     }
@@ -547,7 +584,7 @@ function FeedbackWidget() {
         setSubject("");
       }
     } catch (err) {
-      setResult({ ok: false, error: `Video feedback failed: ${err.message}` });
+      setResult({ ok: false, error: `Video feedback failed: ${errorText(err, "the upload didn't complete.")}` });
     } finally {
       setSubmitting(false);
       setUploadProgress(null);

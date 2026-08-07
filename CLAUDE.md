@@ -23,6 +23,22 @@ published to a registry** — apps consume it as a pinned **git dependency** (`g
   `exports` and `typesVersions`.
 - **Peers are external:** React + all `@tiptap/*` are in `tsup.config` `external` and declared as
   optional peers. Consumers install them; the composer is lazy-loaded and imports TipTap directly.
+- **Error handling (v0.6.0+) — the library reports NOTHING.** No Sentry client, no telemetry, no
+  `console.*`. Observability is the host app's call (Rondie, 2026-08-06); our job is to hand back
+  errors a host can act on without parsing a message string. Three rules:
+  1. **Throw `FeedbackError`** (`src/core/errors.ts`) with `step`, `httpStatus`, `responseBody`,
+     `cause`, and `retryable`. Never `throw new Error("...")` from core.
+  2. **`retryable` is load-bearing.** 400/401/403/404/410/422 ⇒ permanent; everything else transient.
+     A poller uses this to stop instead of re-sending a doomed request until its budget runs out —
+     that distinction is exactly what a `string | null` return could not express, and its absence hid
+     an expired Vimeo token for six days.
+  3. **Best-effort steps warn, never throw.** `moveTaskToStage` / `setSoleFollower` /
+     `moveVideoToFolder` still return `boolean`, but take an optional `WarningSink` so the reason
+     survives. They surface as `warnings[]` on a successful result — never shown to the user.
+
+  **The asymmetry to preserve:** once a Teamwork task exists, the result stays `ok: true` even if
+  later steps fail. Reporting `ok: false` after creation makes users resubmit and duplicates the
+  task — one copy being a title with no body, since the failing step *was* the body.
 
 ## Commands
 ```bash

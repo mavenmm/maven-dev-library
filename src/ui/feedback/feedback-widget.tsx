@@ -16,6 +16,17 @@ function mmss(total: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Transports are host-supplied, so a rejection is not guaranteed to be an Error —
+ * a bare `throw "nope"` or a rejected non-Error left `(err as Error).message`
+ * undefined and rendered an empty red box with no text in it.
+ */
+function errorText(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err) return err;
+  return fallback;
+}
+
 export function FeedbackWidget() {
   const { isOpen, close, config } = useFeedback();
   const { transport } = config;
@@ -113,7 +124,7 @@ export function FeedbackWidget() {
       setResult(res);
       if (res.ok) { setSubject(""); setBodyHtml(""); setPlainBody(""); setComposerKey((k) => k + 1); }
     } catch (err) {
-      setResult({ ok: false, error: (err as Error).message });
+      setResult({ ok: false, error: errorText(err, "Couldn't send your feedback. Please try again.") });
     } finally { setSubmitting(false); }
   }
 
@@ -127,7 +138,7 @@ export function FeedbackWidget() {
       setResult(res);
       if (res.ok) { recorder.reset(); setSubject(""); }
     } catch (err) {
-      setResult({ ok: false, error: `Video feedback failed: ${(err as Error).message}` });
+      setResult({ ok: false, error: `Video feedback failed: ${errorText(err, "the upload didn't complete.")}` });
     } finally { setSubmitting(false); setUploadProgress(null); }
   }
 

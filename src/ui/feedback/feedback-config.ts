@@ -44,7 +44,19 @@ export interface VideoFeedbackPayload extends FeedbackContextMeta {
 /** Vimeo resumable-upload target minted server-side; browser tus-uploads to it. */
 export interface VideoUploadTarget { uploadLink: string; videoId: string; videoUri: string; }
 
-export interface FeedbackSubmitResult { ok: boolean; taskId?: string; url?: string; error?: string; }
+export interface FeedbackSubmitResult {
+  ok: boolean;
+  taskId?: string;
+  url?: string;
+  error?: string;
+  /**
+   * Best-effort steps that failed while the submission still succeeded (stage
+   * move, follower reset, Vimeo folder filing). Deliberately NOT rendered to the
+   * user — their feedback did land, and half-failures of internal bookkeeping are
+   * not their problem. Forward these to the host's logger.
+   */
+  warnings?: string[];
+}
 
 /**
  * The host-supplied backend. The UI is 100% backend-agnostic: it only ever

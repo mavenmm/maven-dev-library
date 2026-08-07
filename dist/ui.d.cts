@@ -48,6 +48,13 @@ interface FeedbackSubmitResult {
     taskId?: string;
     url?: string;
     error?: string;
+    /**
+     * Best-effort steps that failed while the submission still succeeded (stage
+     * move, follower reset, Vimeo folder filing). Deliberately NOT rendered to the
+     * user — their feedback did land, and half-failures of internal bookkeeping are
+     * not their problem. Forward these to the host's logger.
+     */
+    warnings?: string[];
 }
 /**
  * The host-supplied backend. The UI is 100% backend-agnostic: it only ever
