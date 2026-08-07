@@ -1,0 +1,82 @@
+{
+  "//": "Every app that installs @mavenmm/dev-library. Single source of truth for rollouts — scripts/consumers.sh reads it, and so should you. Adding an app? Add it HERE, not to a script.",
+  "workspaceRoot": "~/Documents/Github",
+  "apps": [
+    {
+      "id": "paab",
+      "name": "PAAB App",
+      "appId": "paab-app",
+      "repo": "https://github.com/mavenmm/paab",
+      "path": "maven-internals/paab-app/frontend",
+      "pkgDir": ".",
+      "defaultBranch": "master",
+      "deploy": "netlify",
+      "notes": "Highest feedback volume — the canary. Video enabled."
+    },
+    {
+      "id": "newsletter",
+      "name": "Newsletter",
+      "appId": "newsletter",
+      "repo": "https://github.com/mavenmm/newsletter",
+      "path": "maven-internals/newsletter",
+      "pkgDir": ".",
+      "defaultBranch": "main",
+      "deploy": "netlify",
+      "notes": "Needs npm >= 11.16.0 — older npm cannot install a git dep with min-release-age set."
+    },
+    {
+      "id": "maven-home",
+      "name": "Maven Home",
+      "appId": "maven-home",
+      "repo": "https://github.com/mavenmm/home",
+      "path": "maven-internals/maven-home",
+      "pkgDir": ".",
+      "defaultBranch": "main",
+      "deploy": "netlify",
+      "notes": "Furthest behind. Jumping from v0.3.0 also picks up shadow DOM (v0.4.0) and the Record-video default (v0.5.2). Roll out ALONE so a failure isn't ambiguous."
+    },
+    {
+      "id": "status-update",
+      "name": "Status Update",
+      "appId": "status-update",
+      "repo": "https://github.com/mavenmm/status-update",
+      "path": "maven-internals/status-update",
+      "pkgDir": ".",
+      "defaultBranch": "master",
+      "deploy": "netlify",
+      "notes": "VITE_FEEDBACK_VIDEO not set locally — confirm it exists in the Netlify build env or the meter never renders."
+    },
+    {
+      "id": "dashboard",
+      "name": "Maven Dashboard",
+      "appId": "maven-dashboard",
+      "repo": "https://github.com/mavenmm/maven-dashboard",
+      "path": "maven-internals/maven-dashboard",
+      "pkgDir": "ui",
+      "defaultBranch": "master",
+      "deploy": "netlify",
+      "notes": "Dep lives in ui/, not the repo root. Prod droplet historically failed on build-on-install — fine since v0.5.3 ships prebuilt dist/."
+    },
+    {
+      "id": "copydeck",
+      "name": "Copydeck",
+      "appId": "copydeck",
+      "repo": "https://github.com/mavenmm/copydeck-writing",
+      "path": "maven-internals/copydeck-writing",
+      "pkgDir": "app",
+      "defaultBranch": "main",
+      "deploy": "github-actions",
+      "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge — NOT Netlify. Dep lives in app/."
+    }
+  ],
+  "worker": {
+    "id": "feedback-worker",
+    "name": "maven-feedback-worker",
+    "repo": "https://github.com/mavenmm/maven-feedback-worker",
+    "path": "maven-internals/maven-feedback-worker",
+    "pkgDir": ".",
+    "defaultBranch": "main",
+    "deploy": "wrangler",
+    "notes": "Consumes /core only. Task creation and the Teamwork/Vimeo/summary pipeline live here, so /core fixes reach ALL apps with this one deploy."
+  }
+}
