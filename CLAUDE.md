@@ -49,6 +49,21 @@ published to a registry** — apps consume it as a pinned **git dependency** (`g
   mute switch, gain at zero). `hasAudio:false` on submit means the backend files the task with a
   "no audio" note and does NOT queue it for transcription, because Vimeo can never caption silence.
 
+- **The video summary comment (v0.8.0+) has three sections, in this order:** AI summary, still
+  frames, raw transcript (Teamwork 41044223). Summary first because it's what a human reads;
+  frames next because these reports are mostly visual; transcript last as the long tail, so the
+  submitter's actual wording is preserved in Teamwork rather than only inside Vimeo. Tune via
+  `FeedbackConfig.videoComment` — defaults are on for every app, deliberately, so nobody has to
+  edit six per-app entries.
+  - **Frames come from Vimeo, not from us.** `POST /videos/{id}/pictures` with `{time, active:false}`
+    at 20%/70% of duration. Two non-obvious facts, both verified 2026-08-11: those CDN URLs are
+    fetchable with **no auth** even though the videos are private (that's what makes an `<img>` in
+    Teamwork work at all), and an inactive picture returns an **empty `link`** — the usable URLs
+    live in `sizes[]`. `active:false` matters: `true` would silently overwrite the video's poster.
+  - **The transcript is untrusted text.** Two layers neutralise markup: `vttToText` strips
+    tag-shaped spans (its job is VTT cue markup), then `transcriptToHtml` escapes what survives —
+    which is what catches an unclosed `<script` the first layer's regex can't match.
+
 ## Commands
 ```bash
 npm install        # deps only — does NOT build (no prepare script; see Release)

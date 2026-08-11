@@ -34,6 +34,20 @@ export interface FeedbackConfig {
   /** Per-app public base URL for hosted screenshots (e.g. an S3/R2 domain). */
   screenshotBaseUrl?: string;
   summary?: { model?: string; maxTokens?: number };
+  /**
+   * What accompanies the AI summary in the async comment (Teamwork 41044223).
+   *
+   * The defaults deliberately switch this on for every app without touching
+   * per-app config — six entries would be six chances to miss one.
+   */
+  videoComment?: {
+    /** Append the raw transcript below the summary. Default true. */
+    includeTranscript?: boolean;
+    /** Cap before truncation-with-a-note. Default 15,000. */
+    transcriptMaxChars?: number;
+    /** Still frames to attach. Default 2; 0 disables. */
+    frameCount?: number;
+  };
 }
 
 /** Server-side secrets — NEVER sent to the browser. */
