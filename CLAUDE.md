@@ -85,13 +85,30 @@ bump explicitly (no semver ranges with git deps).
 ## Consumers & rollout
 
 `consumers.json` is the **single source of truth** for who installs this library — id, repo
-URL, path, which subdirectory holds the `package.json`, default branch (three are `master`,
-three are `main`), and how each one deploys. Adding an app? Add it there, not to a script.
+URL, which subdirectory holds the `package.json`, default branch (some are `master`, some
+`main`), which package manager installs it, and how each one deploys. Adding an app? Add it
+there, not to a script.
+
+It holds **no local paths**, deliberately. It used to carry a `workspaceRoot` plus a `path` per
+app — one person's directory tree committed to a shared repo, which resolved to nothing for
+everyone else and failed *silently*, so `consumers.sh` printed a table of blanks that read like
+"nothing is installed anywhere". `scripts/discover.py` now finds each checkout by matching its
+git origin against the repo URL. Only facts true in every clone belong in the registry. A side
+benefit: three checkouts are named differently from their repos (`status-app`, `copydeck-cms`,
+`home`) and nobody has to record it.
+
+The scan root is inferred from where this library itself is checked out — its parent and
+grandparent are tried and the one finding more registry repos wins — so both our layout
+(`tools/maven-dev-library` beside `dev/*`) and a flat one work with no setup. `MAVEN_WORKSPACE`
+overrides it. If a run finds nothing at all it says so and names the root, because a wrong root
+failing quietly is the exact bug this replaced.
 
 ```bash
 ./scripts/consumers.sh            # who's on what: pinned vs installed vs latest tag
+./scripts/discover.py             # where each checkout was found (or NOT CLONED / AMBIGUOUS)
 ./scripts/rollout.sh v0.7.0       # dry run over every app
 ./scripts/rollout.sh v0.7.0 paab --apply   # branch, bump, verify, push, open a PR
+MAVEN_WORKSPACE=~/code ./scripts/consumers.sh   # if you clone somewhere else
 ```
 
 `rollout.sh` **stops at an open PR by design.** Every app deploys on merge, so a script that
@@ -100,6 +117,11 @@ What it does automate is the part that has actually gone wrong: it refuses a dir
 wrong-branch checkout, forces npm to re-resolve the tag, and then **verifies the new code is
 really on disk** — both the version *and* a content marker in `dist/ui.js`, because this
 package ships a committed `dist/` and a tag can carry a stale build.
+
+It bumps with **npm only**, and skips any app whose `packageManager` says otherwise — dashboard
+is a pnpm workspace that refuses npm outright via `preinstall: only-allow pnpm`, so bump that
+one by hand. An app not cloned on this machine is skipped with a reason; an app cloned *twice*
+is a hard error rather than a coin flip about which copy gets bumped.
 
 Two failures worth knowing, both of which have bitten production:
 - **`npm install` after bumping a `#tag` does not reliably re-resolve.** package.json says the
