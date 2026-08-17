@@ -100,9 +100,14 @@ for spec in "${APPS[@]}"; do
   git -C "$repo" pull -q --ff-only
   git -C "$repo" checkout -q -B "$BRANCH"
 
-  # --save forces re-resolution. Plain `npm install` honours the stale lockfile
-  # entry and leaves the OLD version on disk while package.json claims the new one.
-  ( cd "$pkg" && npm install "$DEP" --save >/dev/null 2>&1 ) || {
+  # Point both manifests at the new tag BEFORE installing — see
+  # scripts/bump_manifest.py for why that beats `npm install <spec> --save`
+  # (it no longer works at all under npm 12 with allow-git=root).
+  python3 "$HERE/scripts/bump_manifest.py" "$pkg" "$DEP" || {
+    echo "   FAIL: could not rewrite package.json / package-lock.json"
+    git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:manifest"); continue; }
+
+  ( cd "$pkg" && npm install >/dev/null 2>&1 ) || {
     echo "   FAIL: npm install failed (npm >= 11.16.0 is required with min-release-age)"
     git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:install"); continue; }
 

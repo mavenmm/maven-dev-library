@@ -126,7 +126,12 @@ is a hard error rather than a coin flip about which copy gets bumped.
 Two failures worth knowing, both of which have bitten production:
 - **`npm install` after bumping a `#tag` does not reliably re-resolve.** package.json says the
   new version while `node_modules` keeps the old one. `consumers.sh` flags this as
-  LOCKFILE-DRIFT; `rollout.sh` fails loudly rather than committing it.
+  LOCKFILE-DRIFT; `rollout.sh` fails loudly rather than committing it. The bump itself goes
+  through `scripts/bump_manifest.py`, which rewrites both manifests and **deletes** the
+  lockfile's package entry — deleting is what forces the re-resolve. That replaced
+  `npm install <spec> --save`, which under npm 12 with `allow-git=root` (status-update) is
+  refused outright: npm invalidates the root edge *because* the committish changed, and
+  `allow-git=root` only exempts deps sitting on a valid root edge.
 - **`VITE_FEEDBACK_RICHTEXT` / `VITE_FEEDBACK_VIDEO` are build-time.** Unset in a site's build
   env means the widget ships text-only with no error anywhere. Scripts can't read Netlify env,
   so this stays a manual pre-merge check.
