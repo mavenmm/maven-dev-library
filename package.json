@@ -61,5 +61,10 @@
     "@testing-library/react": "^16.1.0",
     "@testing-library/dom": "^10.4.0",
     "jsdom": "^25.0.1"
+  },
+  "//allowScripts": "npm 12 blocks dependency install scripts unless each one is explicitly approved (true) or denied (false). This map records the decision for every dep that has one. It matters to CONSUMERS, not just to us: npm installs this repo's deps inside the git checkout when an app pulls us in as a git dependency, and a consumer running `strict-allow-scripts` turns an unreviewed script here into a hard install failure on their side (it blocked a status-app Netlify deploy, 2026-08-16). Both entries are safe to deny — esbuild's postinstall only fetches/validates a binary that its @esbuild/<platform> package already delivers as a plain file, and fsevents ships a prebuilt fsevents.node in its tarball, so its node-gyp rebuild is redundant. Deny a new entry unless the package genuinely cannot work without building at install time.",
+  "allowScripts": {
+    "esbuild": false,
+    "fsevents": false
   }
 }

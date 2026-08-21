@@ -45,33 +45,34 @@ git -C "$HERE" rev-parse "$VERSION" >/dev/null 2>&1 || {
 # a COMMITTED dist/, so a tag can carry a stale build).
 MARKER="${MARKER:-mvui-fb-mic-bar}"
 
-eval "$(python3 - "$REG" "${TARGETS[@]:-}" <<'PY'
-import json, os, shlex, sys
-reg = json.load(open(sys.argv[1]))
-want = [t for t in sys.argv[2:] if t]
-root = os.path.expanduser(reg["workspaceRoot"])
-apps = [a for a in reg["apps"] if not want or a["id"] in want]
-if want and len(apps) != len(want):
-    missing = set(want) - {a["id"] for a in apps}
-    print(f'echo "unknown app(s): {" ".join(sorted(missing))}" >&2; exit 1')
-    sys.exit(0)
-print("ROOT=" + shlex.quote(root))
-print("APPS=(" + " ".join(shlex.quote("|".join([a["id"], a["path"], a.get("pkgDir", "."), a["defaultBranch"], a["deploy"]])) for a in apps) + ")")
-PY
-)"
+# Checkouts are found by git remote, not by a path in the registry — see
+# scripts/discover.py. An app that isn't cloned here is skipped with a reason
+# rather than silently treated as clean, and one cloned twice is an error.
+eval "$(python3 "$HERE/scripts/discover.py" --shell "$REG" "${TARGETS[@]:-}")"
 
 echo "rolling out $VERSION  (marker: $MARKER)"
+echo "checkouts located under $SCAN_ROOT (MAVEN_WORKSPACE to change)"
 $APPLY || echo "DRY RUN — nothing will be changed. Add --apply to act."
 echo
 
 FAILED=()
 for spec in "${APPS[@]}"; do
-  IFS='|' read -r id path pkgdir defbranch deploy <<< "$spec"
-  repo="$ROOT/$path"
+  IFS='|' read -r id path pkgdir defbranch deploy pm <<< "$spec"
+  repo="$path"
   pkg="$repo/$pkgdir"
-  echo "── $id  ($path, deploys via $deploy)"
+  echo "── $id  (deploys via $deploy)"
 
+  [ -n "$repo" ] || { echo "   SKIP: no checkout found under $SCAN_ROOT"; FAILED+=("$id:not-cloned"); continue; }
   [ -d "$repo/.git" ] || { echo "   SKIP: not a git repo"; FAILED+=("$id:no-repo"); continue; }
+
+  # This script bumps with npm. A pnpm/yarn workspace needs its own lockfile
+  # semantics, and dashboard additionally blocks npm outright via
+  # `preinstall: only-allow pnpm` — a wrong-tool run there fails confusingly
+  # halfway in, so refuse up front and say what to do instead.
+  if [ "$pm" != "npm" ]; then
+    echo "   SKIP: installs with $pm, not npm — bump this one by hand ($pm add/install in $pkgdir/)"
+    FAILED+=("$id:not-npm"); continue
+  fi
 
   # TRACKED changes only. Untracked files (stray exports, deno.lock, .claude/) are
   # everywhere in these repos and cannot affect a dependency bump — refusing over
@@ -99,9 +100,14 @@ for spec in "${APPS[@]}"; do
   git -C "$repo" pull -q --ff-only
   git -C "$repo" checkout -q -B "$BRANCH"
 
-  # --save forces re-resolution. Plain `npm install` honours the stale lockfile
-  # entry and leaves the OLD version on disk while package.json claims the new one.
-  ( cd "$pkg" && npm install "$DEP" --save >/dev/null 2>&1 ) || {
+  # Point both manifests at the new tag BEFORE installing — see
+  # scripts/bump_manifest.py for why that beats `npm install <spec> --save`
+  # (it no longer works at all under npm 12 with allow-git=root).
+  python3 "$HERE/scripts/bump_manifest.py" "$pkg" "$DEP" || {
+    echo "   FAIL: could not rewrite package.json / package-lock.json"
+    git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:manifest"); continue; }
+
+  ( cd "$pkg" && npm install >/dev/null 2>&1 ) || {
     echo "   FAIL: npm install failed (npm >= 11.16.0 is required with min-release-age)"
     git -C "$repo" checkout -q "$defbranch"; FAILED+=("$id:install"); continue; }
 

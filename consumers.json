@@ -1,82 +1,72 @@
 {
   "//": "Every app that installs @mavenmm/dev-library. Single source of truth for rollouts — scripts/consumers.sh reads it, and so should you. Adding an app? Add it HERE, not to a script.",
-  "workspaceRoot": "~/Documents/Github",
+  "//paths": "There are deliberately no local paths in this file. It used to carry a workspaceRoot plus a path per app, which was one person's directory tree committed to a shared repo — it resolved to nothing for everyone else, silently. scripts/discover.py now locates each checkout by matching its git origin against the repo URL below, scanning $MAVEN_WORKSPACE (default ~/mavenmm). Keep only facts that are true in EVERY clone: repo, pkgDir, defaultBranch, deploy, packageManager.",
+  "//newsletter": "Dropped 2026-08-16 — newsletter no longer depends on the library (no reference in its package.json or package-lock.json). Re-add it here if it picks the widget back up.",
   "apps": [
     {
       "id": "paab",
       "name": "PAAB App",
       "appId": "paab-app",
       "repo": "https://github.com/mavenmm/paab",
-      "path": "maven-internals/paab-app/frontend",
       "pkgDir": ".",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "Highest feedback volume — the canary. Video enabled."
-    },
-    {
-      "id": "newsletter",
-      "name": "Newsletter",
-      "appId": "newsletter",
-      "repo": "https://github.com/mavenmm/newsletter",
-      "path": "maven-internals/newsletter",
-      "pkgDir": ".",
-      "defaultBranch": "main",
-      "deploy": "netlify",
-      "notes": "Needs npm >= 11.16.0 — older npm cannot install a git dep with min-release-age set."
+      "packageManager": "npm",
+      "notes": "Highest feedback volume — the canary. Video enabled. npm 11.10.0, pinned in both volta and netlify.toml."
     },
     {
       "id": "maven-home",
       "name": "Maven Home",
       "appId": "maven-home",
       "repo": "https://github.com/mavenmm/home",
-      "path": "maven-internals/maven-home",
       "pkgDir": ".",
       "defaultBranch": "main",
       "deploy": "netlify",
-      "notes": "Furthest behind. Jumping from v0.3.0 also picks up shadow DOM (v0.4.0) and the Record-video default (v0.5.2). Roll out ALONE so a failure isn't ambiguous."
+      "packageManager": "npm",
+      "notes": "Furthest behind (v0.5.2). Jumping forward also picks up mic verification (v0.7.0). Roll out ALONE so a failure isn't ambiguous. Pins no npm version anywhere, so CI falls back to Netlify's npm 10.x, which ignores min-release-age — the cooldown holds locally and not in the builds that ship. Pin npm >= 11.10.0 (verified: 11.10.0 holds a version back, 10.8.2 does not) in volta AND netlify.toml."
     },
     {
       "id": "status-update",
       "name": "Status Update",
       "appId": "status-update",
       "repo": "https://github.com/mavenmm/status-update",
-      "path": "maven-internals/status-update",
       "pkgDir": ".",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "VITE_FEEDBACK_VIDEO not set locally — confirm it exists in the Netlify build env or the meter never renders."
+      "packageManager": "npm",
+      "notes": "VITE_FEEDBACK_VIDEO not set locally — confirm it exists in the Netlify build env or the meter never renders. The only app on npm 12 (pinned in volta AND netlify.toml): it sets strict-allow-scripts, so it needs v0.7.1+, and allow-git=root, which makes the FIRST install after any tag bump fail as 'non-root' until the lockfile is hand-synced — recipe is in its .npmrc, and rollout.sh does it automatically."
     },
     {
       "id": "dashboard",
       "name": "Maven Dashboard",
       "appId": "maven-dashboard",
       "repo": "https://github.com/mavenmm/maven-dashboard",
-      "path": "maven-internals/maven-dashboard",
       "pkgDir": "ui",
       "defaultBranch": "master",
       "deploy": "netlify",
-      "notes": "Dep lives in ui/, not the repo root. Prod droplet historically failed on build-on-install — fine since v0.5.3 ships prebuilt dist/."
+      "packageManager": "pnpm",
+      "notes": "Dep lives in ui/, not the repo root. Prod droplet historically failed on build-on-install — fine since v0.5.3 ships prebuilt dist/. A pnpm workspace pinned to pnpm@10.34.3 with `preinstall: only-allow pnpm`, so rollout.sh skips it — bump this one by hand with pnpm. Its build-script allowlist is allowBuilds in pnpm-workspace.yaml (which already lists @mavenmm/dev-library), not an npm allowScripts map."
     },
     {
       "id": "copydeck",
       "name": "Copydeck",
       "appId": "copydeck",
       "repo": "https://github.com/mavenmm/copydeck-writing",
-      "path": "maven-internals/copydeck-writing",
       "pkgDir": "app",
       "defaultBranch": "main",
       "deploy": "github-actions",
-      "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge — NOT Netlify. Dep lives in app/."
+      "packageManager": "npm",
+      "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge — NOT Netlify. The workflow only SSHes in and runs ~/copydeck-cms/deploy.sh, so the node/npm that installs is whatever the droplet has; it is not pinned in the repo. Dep lives in app/."
     }
   ],
   "worker": {
     "id": "feedback-worker",
     "name": "maven-feedback-worker",
     "repo": "https://github.com/mavenmm/maven-feedback-worker",
-    "path": "maven-internals/maven-feedback-worker",
     "pkgDir": ".",
     "defaultBranch": "main",
     "deploy": "wrangler",
+    "packageManager": "npm",
     "notes": "Consumes /core only. Task creation and the Teamwork/Vimeo/summary pipeline live here, so /core fixes reach ALL apps with this one deploy."
   }
 }
