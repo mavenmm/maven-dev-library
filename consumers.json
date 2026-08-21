@@ -57,6 +57,18 @@
       "deploy": "github-actions",
       "packageManager": "npm",
       "notes": "Deploys to a droplet via .github/workflows/deploy.yml on merge — NOT Netlify. The workflow only SSHes in and runs ~/copydeck-cms/deploy.sh, so the node/npm that installs is whatever the droplet has; it is not pinned in the repo. Dep lives in app/."
+    },
+    {
+      "id": "reference-library",
+      "name": "Reference Anchor Library",
+      "appId": "reference-library",
+      "repo": "https://github.com/mavenmm/reference-database",
+      "path": "maven-dev/reference-database",
+      "pkgDir": "app",
+      "defaultBranch": "main",
+      "deploy": "github-actions",
+      "packageManager": "npm",
+      "notes": "Added in FB-034 at v0.7.1. Deploys to droplet 159.89.124.178 via .github/workflows/deploy.yml, which SSHes in and runs `npm ci` — so the lockfile, not a fresh resolve, decides what ships. Its app/.npmrc sets min-release-age=14 AND engine-strict=true, and engines pins npm >= 11.13.0: below that npm crashes preparing a git dependency under the cooldown (11.10.x/11.11.x on --min-release-age vs --before, 11.12.0 on --prefer-online vs --prefer-offline). Verified 2026-08-21: 11.13.0/11.16.0/11.19.0 all install and `npm ci` cleanly with the cooldown on. Rich text needs the tiptap peer deps, which this repo carries explicitly (copydeck got them free from its own editor)."
     }
   ],
   "worker": {
