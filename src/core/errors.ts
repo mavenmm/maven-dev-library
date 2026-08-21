@@ -21,6 +21,7 @@ export type FeedbackStep =
   | "teamwork.setFollower"
   | "vimeo.createUpload"
   | "vimeo.moveToFolder"
+  | "vimeo.frames"
   | "vimeo.fetchTranscript"
   | "anthropic.summarize";
 

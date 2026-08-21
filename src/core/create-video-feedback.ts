@@ -1,12 +1,29 @@
 import type { FeedbackConfig, Secrets, Submitter, SubmitVideoInput, SubmitVideoResult, VideoUploadTarget, PendingVideo, SummaryOutcome, CreateFeedbackResult } from "./types";
-import { buildContextHtml, buildTitle, escapeHtml } from "./compose";
+import { buildContextHtml, buildTitle, escapeHtml, transcriptToHtml } from "./compose";
 import { addHtmlComment, createFeedbackTaskInTeamwork, moveTaskToStage, setSoleFollower, teamworkTaskUrl } from "./teamwork";
-import { createVimeoUpload, moveVideoToFolder, vimeoWatchUrl, fetchTranscriptResult } from "./vimeo";
+import { createVimeoUpload, fetchVideoFrames, moveVideoToFolder, vimeoWatchUrl, fetchTranscriptResult } from "./vimeo";
 import { summarizeTranscript } from "./summary";
 import { FeedbackError, isFeedbackError, messageOf, type WarningSink } from "./errors";
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS = 700;
+/** Frames attached to the summary comment. Dave asked for "a still frame or two". */
+const DEFAULT_FRAME_COUNT = 2;
+
+/**
+ * Frames as clickable thumbnails.
+ *
+ * Each image links to the recording, so a frame that catches someone's eye is one
+ * click from the moment it came from. Width is capped in the markup because
+ * Teamwork renders comment HTML at full size otherwise, and a 1280px screenshot
+ * would dwarf the summary above it.
+ */
+function framesHtml(urls: string[], watchUrl: string): string {
+  const imgs = urls
+    .map((u) => `<a href="${escapeHtml(watchUrl)}"><img src="${escapeHtml(u)}" width="420" alt="Still frame from the screen recording"/></a>`)
+    .join(" ");
+  return `<p>${imgs}</p>`;
+}
 
 /** Step 1 of the video path: mint a Vimeo resumable-upload target. */
 export async function createVideoTarget(_cfg: FeedbackConfig, secrets: Secrets, sizeBytes: number, subject: string): Promise<VideoUploadTarget> {
@@ -121,8 +138,30 @@ export async function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secret
   }
 
   const warnings: WarningSink = [];
+
+  // Section order is deliberate (Teamwork 41044223). Summary first — Dave: "keep
+  // the AI summary above it all", it's what a human reads. Frames next, because a
+  // screenshot beats any amount of transcript for the visual bugs these reports
+  // mostly are. Transcript last: it's the long tail, and it's there so the raw
+  // wording is preserved in Teamwork rather than only inside Vimeo.
+  const frameCount = cfg.videoComment?.frameCount ?? DEFAULT_FRAME_COUNT;
+  const frameUrls = secrets.vimeoToken
+    ? await fetchVideoFrames(secrets.vimeoToken, pending.videoId, frameCount, warnings)
+    : [];
+
+  const watch = vimeoWatchUrl(pending.videoId);
+  const includeTranscript = cfg.videoComment?.includeTranscript ?? true;
+  const transcriptHtml = includeTranscript
+    ? transcriptToHtml(transcript.text, { maxChars: cfg.videoComment?.transcriptMaxChars, videoUrl: watch })
+    : "";
+
+  const body =
+    `<p>🤖 <strong>AI summary</strong></p>${summary}` +
+    (frameUrls.length ? `<hr/><p>🖼 <strong>Frames from the recording</strong></p>${framesHtml(frameUrls, watch)}` : "") +
+    (transcriptHtml ? `<hr/><p>📝 <strong>Full transcript</strong></p>${transcriptHtml}` : "");
+
   try {
-    await addHtmlComment(cfg.teamwork, secrets.teamworkToken, pending.taskId, `<p>🤖 <strong>AI summary</strong></p>${summary}`);
+    await addHtmlComment(cfg.teamwork, secrets.teamworkToken, pending.taskId, body);
   } catch (err) {
     return summaryFailure(err);
   }

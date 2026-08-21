@@ -69,6 +69,36 @@ function escapeHtml(s) {
   if (s === null || s === void 0) return "";
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
+var TRANSCRIPT_PARA_CHARS = 400;
+var TRANSCRIPT_MAX_CHARS = 15e3;
+function transcriptToHtml(text, opts = {}) {
+  const maxChars = opts.maxChars ?? TRANSCRIPT_MAX_CHARS;
+  const full = String(text ?? "").trim();
+  if (!full) return "";
+  let body = full;
+  let truncated = false;
+  if (full.length > maxChars) {
+    truncated = true;
+    const cut = full.slice(0, maxChars);
+    const lastSpace = cut.lastIndexOf(" ");
+    body = (lastSpace > maxChars * 0.8 ? cut.slice(0, lastSpace) : cut).trimEnd();
+  }
+  const sentences = body.split(/(?<=[.!?])\s+/);
+  const paras = [];
+  let current = "";
+  for (const sentence of sentences) {
+    current = current ? `${current} ${sentence}` : sentence;
+    if (current.length >= TRANSCRIPT_PARA_CHARS) {
+      paras.push(current);
+      current = "";
+    }
+  }
+  if (current) paras.push(current);
+  const html = paras.map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+  if (!truncated) return html;
+  const link = opts.videoUrl ? ` Watch the full recording: <a href="${escapeHtml(opts.videoUrl)}">${escapeHtml(opts.videoUrl)}</a>` : "";
+  return `${html}<p><em>Transcript truncated at ${maxChars.toLocaleString("en-US")} characters (of ${full.length.toLocaleString("en-US")}).${link}</em></p>`;
+}
 function easternDatePrefix(now = /* @__PURE__ */ new Date()) {
   return new Intl.DateTimeFormat("en-US", { timeZone: "America/Toronto", month: "short", day: "numeric" }).format(now);
 }
@@ -353,6 +383,84 @@ async function moveVideoToFolder(token, videoId, folderId, warnings) {
     return false;
   }
 }
+var FRAME_POSITIONS = [0.2, 0.7];
+var FRAME_TARGET_WIDTH = 1280;
+async function videoDurationSec(token, videoId) {
+  try {
+    const res = await fetch(`${VIMEO_API}/videos/${videoId}?fields=duration`, { headers: vheaders(token) });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const d = Number(j.duration);
+    return Number.isFinite(d) && d > 0 ? d : null;
+  } catch {
+    return null;
+  }
+}
+function pickSize(sizes) {
+  const usable = (sizes ?? []).filter((s) => s.link);
+  if (!usable.length) return null;
+  const atLeastTarget = usable.filter((s) => (s.width ?? 0) >= FRAME_TARGET_WIDTH);
+  const chosen = atLeastTarget.length ? atLeastTarget.reduce((a, b) => (a.width ?? 0) <= (b.width ?? 0) ? a : b) : usable.reduce((a, b) => (a.width ?? 0) >= (b.width ?? 0) ? a : b);
+  return chosen.link ?? null;
+}
+async function fetchVideoFrames(token, videoId, count, warnings) {
+  if (!Number.isFinite(count) || count <= 0) return [];
+  const duration = await videoDurationSec(token, videoId);
+  if (duration === null) {
+    const auto = await fetchExistingFrame(token, videoId);
+    if (!auto) pushWarning(warnings, { step: "vimeo.frames", message: `Could not read duration or any existing thumbnail for video ${videoId}; task comment will have no frames.` });
+    return auto ? [auto] : [];
+  }
+  const positions = FRAME_POSITIONS.slice(0, count);
+  const urls = [];
+  for (const fraction of positions) {
+    const time = Math.max(0, Math.min(duration - 0.1, duration * fraction));
+    const url = await createFrameAt(token, videoId, time, warnings);
+    if (url) urls.push(url);
+  }
+  if (!urls.length) {
+    const auto = await fetchExistingFrame(token, videoId);
+    if (auto) return [auto];
+    pushWarning(warnings, { step: "vimeo.frames", message: `No frames could be generated for video ${videoId}; task comment will have no frames.` });
+  }
+  return urls;
+}
+async function createFrameAt(token, videoId, time, warnings) {
+  try {
+    const res = await fetch(`${VIMEO_API}/videos/${videoId}/pictures`, {
+      method: "POST",
+      headers: vheaders(token, { "Content-Type": "application/json" }),
+      // active:false — additive only. Setting it true would silently replace the
+      // video's poster image every time we file a comment.
+      body: JSON.stringify({ time: Number(time.toFixed(2)), active: false })
+    });
+    if (!res.ok) {
+      pushWarning(warnings, {
+        step: "vimeo.frames",
+        message: `Vimeo would not generate a frame at ${time.toFixed(1)}s for video ${videoId}: HTTP ${res.status} \u2014 ${await safeBodyText(res, 160)}`,
+        httpStatus: res.status
+      });
+      return null;
+    }
+    const j = await res.json();
+    return pickSize(j.sizes);
+  } catch (err) {
+    pushWarning(warnings, { step: "vimeo.frames", message: `Frame generation at ${time.toFixed(1)}s could not reach the Vimeo API: ${messageOf(err)}` });
+    return null;
+  }
+}
+async function fetchExistingFrame(token, videoId) {
+  try {
+    const res = await fetch(`${VIMEO_API}/videos/${videoId}/pictures`, { headers: vheaders(token) });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const pics = j.data ?? [];
+    const preferred = pics.find((p) => p.active) ?? pics[0];
+    return pickSize(preferred?.sizes);
+  } catch {
+    return null;
+  }
+}
 function vttToText(vtt) {
   const out = [];
   let last = "";
@@ -455,6 +563,11 @@ async function summarizeTranscript(anthropicKey, model, maxTokens, transcript) {
 // src/core/create-video-feedback.ts
 var DEFAULT_MODEL = "claude-sonnet-4-6";
 var DEFAULT_MAX_TOKENS = 700;
+var DEFAULT_FRAME_COUNT = 2;
+function framesHtml(urls, watchUrl) {
+  const imgs = urls.map((u) => `<a href="${escapeHtml(watchUrl)}"><img src="${escapeHtml(u)}" width="420" alt="Still frame from the screen recording"/></a>`).join(" ");
+  return `<p>${imgs}</p>`;
+}
 async function createVideoTarget(_cfg, secrets, sizeBytes, subject) {
   if (!secrets.vimeoToken) {
     throw new FeedbackError({ step: "vimeo.createUpload", message: "Vimeo is not configured for this app.", retryable: false });
@@ -524,8 +637,14 @@ async function summarizePendingVideo(cfg, secrets, pending) {
     return summaryFailure(err);
   }
   const warnings = [];
+  const frameCount = cfg.videoComment?.frameCount ?? DEFAULT_FRAME_COUNT;
+  const frameUrls = secrets.vimeoToken ? await fetchVideoFrames(secrets.vimeoToken, pending.videoId, frameCount, warnings) : [];
+  const watch = vimeoWatchUrl(pending.videoId);
+  const includeTranscript = cfg.videoComment?.includeTranscript ?? true;
+  const transcriptHtml = includeTranscript ? transcriptToHtml(transcript.text, { maxChars: cfg.videoComment?.transcriptMaxChars, videoUrl: watch }) : "";
+  const body = `<p>\u{1F916} <strong>AI summary</strong></p>${summary}` + (frameUrls.length ? `<hr/><p>\u{1F5BC} <strong>Frames from the recording</strong></p>${framesHtml(frameUrls, watch)}` : "") + (transcriptHtml ? `<hr/><p>\u{1F4DD} <strong>Full transcript</strong></p>${transcriptHtml}` : "");
   try {
-    await addHtmlComment(cfg.teamwork, secrets.teamworkToken, pending.taskId, `<p>\u{1F916} <strong>AI summary</strong></p>${summary}`);
+    await addHtmlComment(cfg.teamwork, secrets.teamworkToken, pending.taskId, body);
   } catch (err) {
     return summaryFailure(err);
   }
@@ -553,6 +672,7 @@ export {
   CORE_VERSION,
   FEEDBACK_TYPES,
   FeedbackError,
+  TRANSCRIPT_MAX_CHARS,
   addHtmlComment,
   buildContextHtml,
   buildTitle,
@@ -564,6 +684,7 @@ export {
   escapeHtml,
   fetchTranscript,
   fetchTranscriptResult,
+  fetchVideoFrames,
   isFeedbackError,
   isPermanentHttpStatus,
   messageOf,
@@ -579,6 +700,7 @@ export {
   summarizeTranscript,
   teamworkTaskUrl,
   titlePrefixFor,
+  transcriptToHtml,
   vimeoWatchUrl,
   vttToText
 };

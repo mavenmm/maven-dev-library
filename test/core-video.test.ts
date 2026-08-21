@@ -72,7 +72,12 @@ describe("summarizePendingVideo", () => {
       return jsonRes(true, {}); // teamwork comment
     }));
     const out = await summarizePendingVideo(cfg, { teamworkToken: "T", vimeoToken: "V", anthropicKey: "A" }, { taskId: "777", videoId: "555" });
-    expect(out).toEqual({ status: "summarized" });
+    // Summarising succeeds. This stub serves no Vimeo /pictures data, so the
+    // still-frame step finds nothing and warns — which is the point of it being
+    // best-effort: no frames must never cost the summary. Frame behaviour proper
+    // is covered in core-transcript-frames.test.ts.
+    expect(out).toMatchObject({ status: "summarized" });
+    expect((out as { warnings?: string[] }).warnings?.join(" ")).toMatch(/frame/i);
   });
 
   it("fails gracefully when not configured", async () => {

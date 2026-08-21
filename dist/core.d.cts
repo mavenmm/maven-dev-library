@@ -1,5 +1,5 @@
 /** Which library operation produced the error. Stable strings — safe to switch on. */
-type FeedbackStep = "teamwork.createTask" | "teamwork.addComment" | "teamwork.moveStage" | "teamwork.setFollower" | "vimeo.createUpload" | "vimeo.moveToFolder" | "vimeo.fetchTranscript" | "anthropic.summarize";
+type FeedbackStep = "teamwork.createTask" | "teamwork.addComment" | "teamwork.moveStage" | "teamwork.setFollower" | "vimeo.createUpload" | "vimeo.moveToFolder" | "vimeo.frames" | "vimeo.fetchTranscript" | "anthropic.summarize";
 /**
  * HTTP statuses where retrying the identical request can never succeed: bad
  * credentials, missing resource, malformed request. Everything else (5xx, 408,
@@ -111,6 +111,20 @@ interface FeedbackConfig {
         model?: string;
         maxTokens?: number;
     };
+    /**
+     * What accompanies the AI summary in the async comment (Teamwork 41044223).
+     *
+     * The defaults deliberately switch this on for every app without touching
+     * per-app config — six entries would be six chances to miss one.
+     */
+    videoComment?: {
+        /** Append the raw transcript below the summary. Default true. */
+        includeTranscript?: boolean;
+        /** Cap before truncation-with-a-note. Default 15,000. */
+        transcriptMaxChars?: number;
+        /** Still frames to attach. Default 2; 0 disables. */
+        frameCount?: number;
+    };
 }
 /** Server-side secrets — NEVER sent to the browser. */
 interface Secrets {
@@ -217,6 +231,29 @@ declare function titlePrefixFor(type: FeedbackType): string;
  * submission over a display detail (copydeck, 2026-08-04).
  */
 declare function escapeHtml(s: string): string;
+/** Default transcript cap: ~25 minutes of speech. Feedback videos run 1–3 min. */
+declare const TRANSCRIPT_MAX_CHARS = 15000;
+interface TranscriptHtmlOptions {
+    /** Hard cap on transcript characters before truncation. Default 15,000. */
+    maxChars?: number;
+    /** Linked in the truncation note, so a cut transcript never looks silently lost. */
+    videoUrl?: string;
+}
+/**
+ * Render a raw transcript as Teamwork-comment HTML.
+ *
+ * Three jobs, all of which matter:
+ *
+ *  - **Escape it.** This is untrusted speech-to-text. An unescaped `<` corrupts the
+ *    whole comment body, taking the AI summary down with it.
+ *  - **Reflow it.** `vttToText` space-joins every cue into one unbroken string;
+ *    15,000 characters of that is a wall nobody reads. Split on sentence
+ *    boundaries into skimmable paragraphs — this changes presentation only, so the
+ *    text an LLM reads is identical.
+ *  - **Cap it.** Truncate on a word boundary and say so, naming the recording, per
+ *    Dave's "truncate with a note rather than letting the task become unreadable".
+ */
+declare function transcriptToHtml(text: string, opts?: TranscriptHtmlOptions): string;
 /** Eastern-time "Mon DD" task-title date prefix (America/Toronto), matching copydeck. */
 declare function easternDatePrefix(now?: Date): string;
 declare function buildTitle(type: FeedbackType, subject: string, now?: Date): string;
@@ -278,6 +315,22 @@ declare function vimeoWatchUrl(videoId: string): string;
 declare function createVimeoUpload(token: string, name: string, sizeBytes: number): Promise<VideoUploadTarget>;
 /** Best-effort: file the video into a folder BY ID. Never throws; pass `warnings` for the reason. */
 declare function moveVideoToFolder(token: string, videoId: string, folderId?: string, warnings?: WarningSink): Promise<boolean>;
+/**
+ * Public image URLs for still frames from the recording.
+ *
+ * Why this exists: the videos are unlisted and private to our Vimeo account, so
+ * nothing outside it can see them — but Vimeo's thumbnail CDN serves these frame
+ * URLs with **no auth at all** (verified 2026-08-11: HTTP 200, image/jpeg). So an
+ * `<img>` in a Teamwork comment just works, for a human or for an LLM reading the
+ * task, which is exactly what Dave asked for.
+ *
+ * Frames are generated with `active: false` so we never overwrite the video's own
+ * poster image as a side effect. Note the API returns an EMPTY `link` for inactive
+ * pictures — the usable URLs are in `sizes[]`.
+ *
+ * Best-effort: never throws. A missing frame is a warning, not a failed comment.
+ */
+declare function fetchVideoFrames(token: string, videoId: string, count: number, warnings?: WarningSink): Promise<string[]>;
 /** VTT → plain text: drop header/timestamps/tags + consecutive duplicate cues. */
 declare function vttToText(vtt: string): string;
 /**
@@ -338,4 +391,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, type TeamworkConfig, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
