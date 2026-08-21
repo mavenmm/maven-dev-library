@@ -55,7 +55,31 @@ npm install        # deps only — does NOT build (no prepare script; see Releas
 npm test           # vitest — core specs + jsdom UI tests (query the widget THROUGH the shadow root)
 npm run typecheck  # tsc --noEmit
 npm run build      # tsup && cp src/ui/styles.css dist/styles.css — writes the COMMITTED dist/
+npm run verify:cooldown  # is the supply-chain cooldown actually in force here?
 ```
+
+### The supply-chain cooldown must actually apply
+
+`.npmrc` sets `min-release-age=14`, but **npm 10.x does not know that key and
+ignores it silently** — no warning, no error, it just installs the newest
+release. So the line existing proves nothing about the install you ran. Measured
+2026-08-21 against esbuild (0.28.2 was 12 days old, 0.28.1 was 70):
+
+| npm | cooldown | resolved |
+|---|---|---|
+| 10.8.2 | on | 0.28.2 — **ignored** |
+| 11.10.0 | on | 0.28.1 — enforced |
+| 11.13.0 | on | 0.28.1 — enforced |
+| 11.10.0 | off | 0.28.2 — control |
+
+So `engines.npm` is `>=11.10.0` and `.npmrc` sets `engine-strict=true`, which
+turns a too-old npm into a loud `EBADENGINE` instead of a quiet loss of the
+control. `volta` pins a compliant npm so this is automatic locally.
+
+Never "fix" an install problem by relaxing any of those three. If a consuming
+app hits the cooldown, raise its npm floor instead — the apps need `>=11.13.0`,
+higher than this repo, because they install this library as a **git** dependency
+and npm 11.10.x–11.12.x crash preparing a git dep under a cooldown.
 
 ## Release — `dist/` is committed; YOU MUST BUILD BEFORE TAGGING
 
