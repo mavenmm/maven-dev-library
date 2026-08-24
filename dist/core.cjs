@@ -24,10 +24,12 @@ __export(core_exports, {
   FEEDBACK_TYPES: () => FEEDBACK_TYPES,
   FeedbackError: () => FeedbackError,
   TRANSCRIPT_MAX_CHARS: () => TRANSCRIPT_MAX_CHARS,
+  TeamworkWorkerError: () => TeamworkWorkerError,
   addHtmlComment: () => addHtmlComment,
   buildContextHtml: () => buildContextHtml,
   buildTitle: () => buildTitle,
   createFeedbackTaskInTeamwork: () => createFeedbackTaskInTeamwork,
+  createTeamworkWorkerClient: () => createTeamworkWorkerClient,
   createTextFeedback: () => createTextFeedback,
   createVideoTarget: () => createVideoTarget,
   createVimeoUpload: () => createVimeoUpload,
@@ -328,6 +330,58 @@ async function setSoleFollower(cfg, token, taskId, followerId, warnings) {
     pushWarning(warnings, { step: "teamwork.setFollower", message: `Task ${taskId} follower reset could not reach the API: ${messageOf(err)}` });
     return false;
   }
+}
+
+// src/core/teamwork-worker-client.ts
+var TeamworkWorkerError = class extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+    this.name = "TeamworkWorkerError";
+  }
+};
+function createTeamworkWorkerClient(opts) {
+  const base = opts.workerUrl.replace(/\/$/, "");
+  if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
+  const timeoutMs = opts.timeoutMs ?? 1e4;
+  async function call(method, path, body) {
+    const jwt = await opts.getJwt();
+    if (!jwt) throw new TeamworkWorkerError(401, "No Maven session \u2014 cannot call the Teamwork worker");
+    let res;
+    try {
+      res = await fetch(`${base}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "x-maven-app-id": opts.appId,
+          ...body !== void 0 ? { "Content-Type": "application/json" } : {}
+        },
+        ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (err) {
+      throw new TeamworkWorkerError(0, `Teamwork worker unreachable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+    }
+    if (!res.ok) {
+      const msg = json && typeof json === "object" && typeof json.error === "string" ? json.error : `Teamwork worker HTTP ${res.status}`;
+      throw new TeamworkWorkerError(res.status, msg);
+    }
+    return json;
+  }
+  return {
+    listTasklists: (projectId) => call("GET", `/projects/${projectId}/tasklists`),
+    createTasklist: (projectId, name) => call("POST", `/projects/${projectId}/tasklists`, { name }),
+    createTask: (tasklistId, input) => call("POST", `/tasklists/${tasklistId}/tasks`, input),
+    completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
+    reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
+    listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
+    createComment: (taskId, body) => call("POST", `/tasks/${taskId}/comments`, { body })
+  };
 }
 
 // src/core/create-text-feedback.ts
@@ -733,10 +787,12 @@ var CORE_VERSION = "0.3.0";
   FEEDBACK_TYPES,
   FeedbackError,
   TRANSCRIPT_MAX_CHARS,
+  TeamworkWorkerError,
   addHtmlComment,
   buildContextHtml,
   buildTitle,
   createFeedbackTaskInTeamwork,
+  createTeamworkWorkerClient,
   createTextFeedback,
   createVideoTarget,
   createVimeoUpload,

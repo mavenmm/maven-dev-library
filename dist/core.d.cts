@@ -292,6 +292,81 @@ declare function moveTaskToStage(cfg: TeamworkConfig, token: string, taskId: str
 /** Best-effort: reset followers to ONLY `followerId` (shared-token case). Never throws. */
 declare function setSoleFollower(cfg: TeamworkConfig, token: string, taskId: string, followerId: string, warnings?: WarningSink): Promise<boolean>;
 
+type TeamworkTokenUsed = "user" | "service";
+interface TeamworkWorkerClientOptions {
+    /**
+     * The worker origin (e.g. from a TEAMWORK_WORKER_URL env var). Not a secret — the
+     * worker rejects anything without a valid Maven SSO JWT — but deliberately not
+     * hardcoded here either: this library is public, and keeping infrastructure
+     * addresses in each app's own config means a URL change never needs a library
+     * release.
+     */
+    workerUrl: string;
+    /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
+    appId: string;
+    /**
+     * Returns the current user's Maven SSO JWT (the raw `maven_refresh_token` cookie
+     * value), or null when there is no session — in which case calls throw
+     * TeamworkWorkerError(401) without hitting the network.
+     */
+    getJwt: () => string | null | Promise<string | null>;
+    /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
+    timeoutMs?: number;
+}
+interface WorkerTasklistInfo {
+    id: string;
+    name: string;
+}
+interface WorkerMilestoneInfo {
+    name: string;
+    /** ISO completion date when the milestone is completed; null otherwise. */
+    completedOn: string | null;
+}
+interface WorkerCreateTaskInput {
+    name: string;
+    /** Teamwork renders a description URL as a real link; a task NAME never is. */
+    description?: string;
+    /** Teamwork user id (in Maven apps, User.id IS the Teamwork user id). */
+    assigneeId?: string;
+    /** "top" reorders the new task to the top of its tasklist (best-effort). */
+    position?: "top";
+}
+declare class TeamworkWorkerError extends Error {
+    status: number;
+    constructor(status: number, message: string);
+}
+interface TeamworkWorkerClient {
+    /** All tasklists in a project, INCLUDING completed ones (a completed list is still THE list for a job). */
+    listTasklists(projectId: string): Promise<{
+        tasklists: WorkerTasklistInfo[];
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    createTasklist(projectId: string, name: string): Promise<{
+        id: string;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** No due-date support, deliberately: Teamwork defaults a due date to a random 2021 date (long-standing bug). */
+    createTask(tasklistId: string, input: WorkerCreateTaskInput): Promise<{
+        id: string;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** Complete-never-delete: completing is reversible (reopenTask) and keeps the Teamwork audit trail. */
+    completeTask(taskId: string): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    reopenTask(taskId: string): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    listMilestones(projectId: string): Promise<{
+        milestones: WorkerMilestoneInfo[];
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    createComment(taskId: string, body: string): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+}
+declare function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient;
+
 /**
  * File a text+screenshot feedback task: create task → post body as first comment
  * → best-effort move to stage → (shared-token apps) reset followers.
@@ -391,4 +466,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerMilestoneInfo, type WorkerTasklistInfo, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };

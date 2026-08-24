@@ -4,6 +4,7 @@ export * from "./errors";
 export * from "./types";
 export * from "./compose";
 export * from "./teamwork";
+export * from "./teamwork-worker-client";
 export * from "./create-text-feedback";
 export * from "./vimeo";
 export * from "./summary";
