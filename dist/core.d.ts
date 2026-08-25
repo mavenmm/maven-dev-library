@@ -148,6 +148,25 @@ interface WorkerListTasksParams {
     page?: number;
     include?: string;
     includeCompletedTasks?: boolean;
+    /** Include tasks from archived/completed projects — excluded by default, and most
+     * historical work lives there (live check: one job-type tag went 27 → 87 tasks). */
+    includeArchivedProjects?: boolean;
+}
+/** Allowlisted v3 time-log filters (GET /timelogs on the worker → Teamwork time.json).
+ * userIds filters by the user the time is logged against (the worker maps it to
+ * Teamwork's assignedToUserIds — the plainly-named userIds param is silently ignored
+ * by Teamwork). History-wide sweeps should pair taskIds batching with
+ * includeArchivedProjects and a generous client timeoutMs (bulk pages can take >10s). */
+interface WorkerListTimelogsParams {
+    taskIds?: string;
+    projectIds?: string;
+    userIds?: string;
+    /** ISO dates (YYYY-MM-DD), inclusive. */
+    startDate?: string;
+    endDate?: string;
+    pageSize?: number;
+    page?: number;
+    includeArchivedProjects?: boolean;
 }
 /** v3 PATCH field subset. At least one field required. */
 interface WorkerUpdateTaskInput {
@@ -236,6 +255,12 @@ interface TeamworkWorkerClient {
     }>;
     /** Raw Teamwork v3 tag-list response under `body` (shape owned by Teamwork; cast at the call site). */
     listTags(params?: WorkerListTagsParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** Raw Teamwork v3 time-log response under `body` — `body.timelogs[]` with `minutes`,
+     * `taskId`, `userId`, `date` (shape owned by Teamwork; cast at the call site). */
+    listTimelogs(params?: WorkerListTimelogsParams): Promise<{
         body: unknown;
         tokenUsed: TeamworkTokenUsed;
     }>;
@@ -571,4 +596,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkAuth, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTagsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkAuth, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTagsParams, type WorkerListTasksParams, type WorkerListTimelogsParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };

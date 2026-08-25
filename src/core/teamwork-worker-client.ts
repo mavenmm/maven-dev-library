@@ -94,6 +94,26 @@ export interface WorkerListTasksParams {
   page?: number;
   include?: string;
   includeCompletedTasks?: boolean;
+  /** Include tasks from archived/completed projects — excluded by default, and most
+   * historical work lives there (live check: one job-type tag went 27 → 87 tasks). */
+  includeArchivedProjects?: boolean;
+}
+
+/** Allowlisted v3 time-log filters (GET /timelogs on the worker → Teamwork time.json).
+ * userIds filters by the user the time is logged against (the worker maps it to
+ * Teamwork's assignedToUserIds — the plainly-named userIds param is silently ignored
+ * by Teamwork). History-wide sweeps should pair taskIds batching with
+ * includeArchivedProjects and a generous client timeoutMs (bulk pages can take >10s). */
+export interface WorkerListTimelogsParams {
+  taskIds?: string;
+  projectIds?: string;
+  userIds?: string;
+  /** ISO dates (YYYY-MM-DD), inclusive. */
+  startDate?: string;
+  endDate?: string;
+  pageSize?: number;
+  page?: number;
+  includeArchivedProjects?: boolean;
 }
 
 /** v3 PATCH field subset. At least one field required. */
@@ -158,6 +178,9 @@ export interface TeamworkWorkerClient {
   listMilestones(projectId: string): Promise<{ milestones: WorkerMilestoneInfo[]; tokenUsed: TeamworkTokenUsed }>;
   /** Raw Teamwork v3 tag-list response under `body` (shape owned by Teamwork; cast at the call site). */
   listTags(params?: WorkerListTagsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Raw Teamwork v3 time-log response under `body` — `body.timelogs[]` with `minutes`,
+   * `taskId`, `userId`, `date` (shape owned by Teamwork; cast at the call site). */
+  listTimelogs(params?: WorkerListTimelogsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
   /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text.
    * notifyUserIds: who to notify — omitted/empty notifies NOBODY, and on a service/bot
    * token the author is the bot, so pass the assignee when the comment must reach them. */
@@ -173,7 +196,10 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
   const rawBase = opts.workerUrl ?? (opts.bindingFetch ? "https://internal" : undefined);
   if (!rawBase) throw new TeamworkWorkerError(0, "workerUrl is required (unless bindingFetch is provided)");
   const base = rawBase.replace(/\/$/, "");
-  if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
+  // https only — except localhost, so consumers can test against `wrangler dev`.
+  if (!/^https:\/\//.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)) {
+    throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin (or http://localhost for wrangler dev)");
+  }
   const timeoutMs = opts.timeoutMs ?? 10_000;
 
   if (!opts.getJwt && !opts.serviceSecret && !opts.bindingFetch) {
@@ -247,6 +273,7 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
     reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
     listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
     listTags: (params = {}) => call("GET", `/tags${qs({ ...params })}`),
+    listTimelogs: (params = {}) => call("GET", `/timelogs${qs({ ...params })}`),
     createComment: (taskId, body, contentType, notifyUserIds) =>
       call("POST", `/tasks/${taskId}/comments`, {
         body,
