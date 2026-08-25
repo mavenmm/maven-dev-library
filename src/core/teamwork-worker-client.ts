@@ -96,15 +96,24 @@ export interface WorkerListTasksParams {
   includeCompletedTasks?: boolean;
 }
 
-/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
+/** v3 PATCH field subset. At least one field required. */
 export interface WorkerUpdateTaskInput {
   startAt?: string;
   dueAt?: string;
   tagIds?: number[];
+  /** Replaces the assignee list (Teamwork user ids). */
+  assigneeIds?: number[];
+  /** "" clears the priority. */
+  priority?: "" | "low" | "medium" | "high";
+  estimatedMinutes?: number;
   /** Replace the task's follower lists — on a shared/bot token this is what stops the
    * whole team being notified about one person's item. */
   changeFollowerIds?: number[];
   commentFollowerIds?: number[];
+  /** v3 board-stage move — workflowId and stageId must travel TOGETHER (a lone stageId
+   * gets a 200 and is silently ignored by Teamwork; the worker enforces both-or-neither). */
+  workflowId?: number;
+  stageId?: number;
 }
 
 /** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
@@ -124,6 +133,12 @@ export interface WorkerListCommentsParams {
   orderMode?: "asc" | "desc";
 }
 
+/** Allowlisted v3 tag-list filters (e.g. searchTerm "INT_JT_" resolves job-type tags by name). */
+export interface WorkerListTagsParams {
+  searchTerm?: string;
+  pageSize?: number;
+}
+
 export interface TeamworkWorkerClient {
   /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
   listTasks(params: WorkerListTasksParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
@@ -141,8 +156,17 @@ export interface TeamworkWorkerClient {
   completeTask(taskId: string): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   reopenTask(taskId: string): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   listMilestones(projectId: string): Promise<{ milestones: WorkerMilestoneInfo[]; tokenUsed: TeamworkTokenUsed }>;
-  /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text. */
-  createComment(taskId: string, body: string, contentType?: "text" | "HTML"): Promise<{ tokenUsed: TeamworkTokenUsed }>;
+  /** Raw Teamwork v3 tag-list response under `body` (shape owned by Teamwork; cast at the call site). */
+  listTags(params?: WorkerListTagsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text.
+   * notifyUserIds: who to notify — omitted/empty notifies NOBODY, and on a service/bot
+   * token the author is the bot, so pass the assignee when the comment must reach them. */
+  createComment(
+    taskId: string,
+    body: string,
+    contentType?: "text" | "HTML",
+    notifyUserIds?: number[],
+  ): Promise<{ tokenUsed: TeamworkTokenUsed }>;
 }
 
 export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient {
@@ -222,7 +246,12 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
     completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
     reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
     listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
-    createComment: (taskId, body, contentType) =>
-      call("POST", `/tasks/${taskId}/comments`, { body, ...(contentType ? { contentType } : {}) }),
+    listTags: (params = {}) => call("GET", `/tags${qs({ ...params })}`),
+    createComment: (taskId, body, contentType, notifyUserIds) =>
+      call("POST", `/tasks/${taskId}/comments`, {
+        body,
+        ...(contentType ? { contentType } : {}),
+        ...(notifyUserIds && notifyUserIds.length > 0 ? { notifyUserIds } : {}),
+      }),
   };
 }

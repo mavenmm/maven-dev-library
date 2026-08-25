@@ -194,7 +194,12 @@ function createTeamworkWorkerClient(opts) {
     completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
     reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
     listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
-    createComment: (taskId, body, contentType) => call("POST", `/tasks/${taskId}/comments`, { body, ...contentType ? { contentType } : {} })
+    listTags: (params = {}) => call("GET", `/tags${qs({ ...params })}`),
+    createComment: (taskId, body, contentType, notifyUserIds) => call("POST", `/tasks/${taskId}/comments`, {
+      body,
+      ...contentType ? { contentType } : {},
+      ...notifyUserIds && notifyUserIds.length > 0 ? { notifyUserIds } : {}
+    })
   };
 }
 

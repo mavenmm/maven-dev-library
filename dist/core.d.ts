@@ -149,15 +149,24 @@ interface WorkerListTasksParams {
     include?: string;
     includeCompletedTasks?: boolean;
 }
-/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
+/** v3 PATCH field subset. At least one field required. */
 interface WorkerUpdateTaskInput {
     startAt?: string;
     dueAt?: string;
     tagIds?: number[];
+    /** Replaces the assignee list (Teamwork user ids). */
+    assigneeIds?: number[];
+    /** "" clears the priority. */
+    priority?: "" | "low" | "medium" | "high";
+    estimatedMinutes?: number;
     /** Replace the task's follower lists — on a shared/bot token this is what stops the
      * whole team being notified about one person's item. */
     changeFollowerIds?: number[];
     commentFollowerIds?: number[];
+    /** v3 board-stage move — workflowId and stageId must travel TOGETHER (a lone stageId
+     * gets a 200 and is silently ignored by Teamwork; the worker enforces both-or-neither). */
+    workflowId?: number;
+    stageId?: number;
 }
 /** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
  * handling is unverified). */
@@ -173,6 +182,11 @@ interface WorkerListCommentsParams {
     pageSize?: number;
     orderBy?: string;
     orderMode?: "asc" | "desc";
+}
+/** Allowlisted v3 tag-list filters (e.g. searchTerm "INT_JT_" resolves job-type tags by name). */
+interface WorkerListTagsParams {
+    searchTerm?: string;
+    pageSize?: number;
 }
 interface TeamworkWorkerClient {
     /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
@@ -220,8 +234,15 @@ interface TeamworkWorkerClient {
         milestones: WorkerMilestoneInfo[];
         tokenUsed: TeamworkTokenUsed;
     }>;
-    /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text. */
-    createComment(taskId: string, body: string, contentType?: "text" | "HTML"): Promise<{
+    /** Raw Teamwork v3 tag-list response under `body` (shape owned by Teamwork; cast at the call site). */
+    listTags(params?: WorkerListTagsParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text.
+     * notifyUserIds: who to notify — omitted/empty notifies NOBODY, and on a service/bot
+     * token the author is the bot, so pass the assignee when the comment must reach them. */
+    createComment(taskId: string, body: string, contentType?: "text" | "HTML", notifyUserIds?: number[]): Promise<{
         tokenUsed: TeamworkTokenUsed;
     }>;
 }
@@ -550,4 +571,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkAuth, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkAuth, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTagsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
