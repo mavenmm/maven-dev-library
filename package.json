@@ -1,6 +1,6 @@
 {
   "name": "@mavenmm/dev-library",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": false,
   "description": "Maven's private shared dev-component library (SSOT). Consumed by Maven apps via git dependency — never published. Subpaths: /core (backend logic), /ui (React components).",
   "type": "module",

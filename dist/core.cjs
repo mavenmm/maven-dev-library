@@ -193,7 +193,9 @@ function createTeamworkWorkerClient(opts) {
   const rawBase = opts.workerUrl ?? (opts.bindingFetch ? "https://internal" : void 0);
   if (!rawBase) throw new TeamworkWorkerError(0, "workerUrl is required (unless bindingFetch is provided)");
   const base = rawBase.replace(/\/$/, "");
-  if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
+  if (!/^https:\/\//.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)) {
+    throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin (or http://localhost for wrangler dev)");
+  }
   const timeoutMs = opts.timeoutMs ?? 1e4;
   if (!opts.getJwt && !opts.serviceSecret && !opts.bindingFetch) {
     throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user), serviceSecret (headless), or bindingFetch (worker-to-worker)");
@@ -256,6 +258,7 @@ function createTeamworkWorkerClient(opts) {
     reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
     listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
     listTags: (params = {}) => call("GET", `/tags${qs({ ...params })}`),
+    listTimelogs: (params = {}) => call("GET", `/timelogs${qs({ ...params })}`),
     createComment: (taskId, body, contentType, notifyUserIds) => call("POST", `/tasks/${taskId}/comments`, {
       body,
       ...contentType ? { contentType } : {},
