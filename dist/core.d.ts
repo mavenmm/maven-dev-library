@@ -305,11 +305,19 @@ interface TeamworkWorkerClientOptions {
     /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
     appId: string;
     /**
-     * Returns the current user's Maven SSO JWT (the raw `maven_refresh_token` cookie
-     * value), or null when there is no session — in which case calls throw
-     * TeamworkWorkerError(401) without hitting the network.
+     * USER-caller auth: returns the current user's Maven SSO JWT (the raw
+     * `maven_refresh_token` cookie value), or null when there is no session — in which
+     * case calls throw TeamworkWorkerError(401) without hitting the network.
+     * Exactly one of `getJwt` / `serviceSecret` must be provided.
      */
-    getJwt: () => string | null | Promise<string | null>;
+    getJwt?: () => string | null | Promise<string | null>;
+    /**
+     * SERVICE-caller auth (crons/webhooks — no user session): the app's per-app secret,
+     * matching the worker's APP_SECRET_<APPID>. All actions run as the worker's service
+     * token, and only apps registered `headless: true` in the worker's policy are
+     * accepted. A random value, never a Teamwork token.
+     */
+    serviceSecret?: string;
     /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
     timeoutMs?: number;
 }
@@ -335,7 +343,53 @@ declare class TeamworkWorkerError extends Error {
     status: number;
     constructor(status: number, message: string);
 }
+/** Allowlisted v3 task-list filters (unknown params are dropped by the worker, never forwarded). */
+interface WorkerListTasksParams {
+    tagIds?: string;
+    projectIds?: string;
+    pageSize?: number;
+    page?: number;
+    include?: string;
+    includeCompletedTasks?: boolean;
+}
+/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
+interface WorkerUpdateTaskInput {
+    startAt?: string;
+    dueAt?: string;
+    tagIds?: number[];
+}
+/** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
+ * handling is unverified). */
+interface WorkerUpdateTaskLegacyInput {
+    startDate?: string;
+    tagIds?: string[];
+}
+interface WorkerListCommentsParams {
+    pageSize?: number;
+    orderBy?: string;
+    orderMode?: "asc" | "desc";
+}
 interface TeamworkWorkerClient {
+    /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
+    listTasks(params: WorkerListTasksParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** Raw Teamwork v3 single-task response under `body`. */
+    getTask(taskId: string): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    updateTask(taskId: string, input: WorkerUpdateTaskInput): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    updateTaskLegacy(taskId: string, input: WorkerUpdateTaskLegacyInput): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    listComments(taskId: string, params?: WorkerListCommentsParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
     /** All tasklists in a project, INCLUDING completed ones (a completed list is still THE list for a job). */
     listTasklists(projectId: string): Promise<{
         tasklists: WorkerTasklistInfo[];
@@ -466,4 +520,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerMilestoneInfo, type WorkerTasklistInfo, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };

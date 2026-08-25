@@ -344,15 +344,24 @@ function createTeamworkWorkerClient(opts) {
   const base = opts.workerUrl.replace(/\/$/, "");
   if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
   const timeoutMs = opts.timeoutMs ?? 1e4;
+  if (!opts.getJwt && !opts.serviceSecret) {
+    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user callers) or serviceSecret (headless callers)");
+  }
   async function call(method, path, body) {
-    const jwt = await opts.getJwt();
-    if (!jwt) throw new TeamworkWorkerError(401, "No Maven session \u2014 cannot call the Teamwork worker");
+    const auth = {};
+    if (opts.serviceSecret) {
+      auth["x-maven-app-secret"] = opts.serviceSecret;
+    } else {
+      const jwt = await opts.getJwt();
+      if (!jwt) throw new TeamworkWorkerError(401, "No Maven session \u2014 cannot call the Teamwork worker");
+      auth["Authorization"] = `Bearer ${jwt}`;
+    }
     let res;
     try {
       res = await fetch(`${base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${jwt}`,
+          ...auth,
           "x-maven-app-id": opts.appId,
           ...body !== void 0 ? { "Content-Type": "application/json" } : {}
         },
@@ -373,7 +382,20 @@ function createTeamworkWorkerClient(opts) {
     }
     return json;
   }
+  const qs = (params) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== void 0 && v !== null && v !== false) q.set(k, String(v));
+    }
+    const s = q.toString();
+    return s ? `?${s}` : "";
+  };
   return {
+    listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
+    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
+    updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
+    updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
+    listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
     listTasklists: (projectId) => call("GET", `/projects/${projectId}/tasklists`),
     createTasklist: (projectId, name) => call("POST", `/projects/${projectId}/tasklists`, { name }),
     createTask: (tasklistId, input) => call("POST", `/tasklists/${tasklistId}/tasks`, input),

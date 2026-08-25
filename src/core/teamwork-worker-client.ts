@@ -28,11 +28,19 @@ export interface TeamworkWorkerClientOptions {
   /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
   appId: string;
   /**
-   * Returns the current user's Maven SSO JWT (the raw `maven_refresh_token` cookie
-   * value), or null when there is no session — in which case calls throw
-   * TeamworkWorkerError(401) without hitting the network.
+   * USER-caller auth: returns the current user's Maven SSO JWT (the raw
+   * `maven_refresh_token` cookie value), or null when there is no session — in which
+   * case calls throw TeamworkWorkerError(401) without hitting the network.
+   * Exactly one of `getJwt` / `serviceSecret` must be provided.
    */
-  getJwt: () => string | null | Promise<string | null>;
+  getJwt?: () => string | null | Promise<string | null>;
+  /**
+   * SERVICE-caller auth (crons/webhooks — no user session): the app's per-app secret,
+   * matching the worker's APP_SECRET_<APPID>. All actions run as the worker's service
+   * token, and only apps registered `headless: true` in the worker's policy are
+   * accepted. A random value, never a Teamwork token.
+   */
+  serviceSecret?: string;
   /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
   timeoutMs?: number;
 }
@@ -68,7 +76,44 @@ export class TeamworkWorkerError extends Error {
   }
 }
 
+/** Allowlisted v3 task-list filters (unknown params are dropped by the worker, never forwarded). */
+export interface WorkerListTasksParams {
+  tagIds?: string;
+  projectIds?: string;
+  pageSize?: number;
+  page?: number;
+  include?: string;
+  includeCompletedTasks?: boolean;
+}
+
+/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
+export interface WorkerUpdateTaskInput {
+  startAt?: string;
+  dueAt?: string;
+  tagIds?: number[];
+}
+
+/** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
+ * handling is unverified). */
+export interface WorkerUpdateTaskLegacyInput {
+  startDate?: string;
+  tagIds?: string[];
+}
+
+export interface WorkerListCommentsParams {
+  pageSize?: number;
+  orderBy?: string;
+  orderMode?: "asc" | "desc";
+}
+
 export interface TeamworkWorkerClient {
+  /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
+  listTasks(params: WorkerListTasksParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Raw Teamwork v3 single-task response under `body`. */
+  getTask(taskId: string): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  updateTask(taskId: string, input: WorkerUpdateTaskInput): Promise<{ tokenUsed: TeamworkTokenUsed }>;
+  updateTaskLegacy(taskId: string, input: WorkerUpdateTaskLegacyInput): Promise<{ tokenUsed: TeamworkTokenUsed }>;
+  listComments(taskId: string, params?: WorkerListCommentsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
   /** All tasklists in a project, INCLUDING completed ones (a completed list is still THE list for a job). */
   listTasklists(projectId: string): Promise<{ tasklists: WorkerTasklistInfo[]; tokenUsed: TeamworkTokenUsed }>;
   createTasklist(projectId: string, name: string): Promise<{ id: string; tokenUsed: TeamworkTokenUsed }>;
@@ -86,16 +131,26 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
   if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
   const timeoutMs = opts.timeoutMs ?? 10_000;
 
-  async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
-    const jwt = await opts.getJwt();
-    if (!jwt) throw new TeamworkWorkerError(401, "No Maven session — cannot call the Teamwork worker");
+  if (!opts.getJwt && !opts.serviceSecret) {
+    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user callers) or serviceSecret (headless callers)");
+  }
+
+  async function call<T>(method: "GET" | "POST" | "PATCH" | "PUT", path: string, body?: unknown): Promise<T> {
+    const auth: Record<string, string> = {};
+    if (opts.serviceSecret) {
+      auth["x-maven-app-secret"] = opts.serviceSecret;
+    } else {
+      const jwt = await opts.getJwt!();
+      if (!jwt) throw new TeamworkWorkerError(401, "No Maven session — cannot call the Teamwork worker");
+      auth["Authorization"] = `Bearer ${jwt}`;
+    }
 
     let res: Response;
     try {
       res = await fetch(`${base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${jwt}`,
+          ...auth,
           "x-maven-app-id": opts.appId,
           ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
         },
@@ -122,7 +177,21 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
     return json as T;
   }
 
+  const qs = (params: Record<string, unknown>) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== false) q.set(k, String(v));
+    }
+    const s = q.toString();
+    return s ? `?${s}` : "";
+  };
+
   return {
+    listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
+    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
+    updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
+    updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
+    listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
     listTasklists: (projectId) => call("GET", `/projects/${projectId}/tasklists`),
     createTasklist: (projectId, name) => call("POST", `/projects/${projectId}/tasklists`, { name }),
     createTask: (tasklistId, input) => call("POST", `/tasklists/${tasklistId}/tasks`, input),
