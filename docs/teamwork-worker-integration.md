@@ -69,6 +69,13 @@ app server ──▶ maven-teamwork-worker (CF) ──▶ mavenmm.teamwork.com
 3. Bump `package.json` version, commit, tag `vX.Y.Z`, push (repo is public — nothing
    internal in code or comments).
 4. Bump the consumer's pin: `"@mavenmm/dev-library": "github:mavenmm/maven-dev-library#vX.Y.Z"`.
+   ⚠️ **If the consumer repo has a supply-chain cooldown (`min-release-age` in any npmrc), use
+   the tarball form instead**: `https://codeload.github.com/mavenmm/maven-dev-library/tar.gz/vX.Y.Z`.
+   npm (11.10+) converts min-release-age into an internal `--before` during git-dep preparation
+   and then trips over its own exclusivity check — every `github:#tag` install fails with
+   "--min-release-age cannot be provided when using --before". The tarball pins the same tag
+   but skips git-dep preparation entirely. (Hit live on dev-job-tracker's Netlify build,
+   2026-08-24.)
 
 ## Registering a new app
 
