@@ -52,7 +52,10 @@ export interface FeedbackConfig {
 
 /** Server-side secrets — NEVER sent to the browser. */
 export interface Secrets {
-  teamworkToken: string;
+  /** A raw Teamwork token (direct calls), or a TeamworkWorkerClient — e.g. one built
+   * with `bindingFetch` over a service binding to maven-teamwork-worker, so the caller
+   * holds no Teamwork credential at all. */
+  teamworkToken: import("./teamwork").TeamworkAuth;
   vimeoToken?: string;
   anthropicKey?: string;
 }

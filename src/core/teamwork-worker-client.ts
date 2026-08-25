@@ -24,7 +24,7 @@ export interface TeamworkWorkerClientOptions {
    * addresses in each app's own config means a URL change never needs a library
    * release.
    */
-  workerUrl: string;
+  workerUrl?: string;
   /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
   appId: string;
   /**
@@ -41,6 +41,16 @@ export interface TeamworkWorkerClientOptions {
    * accepted. A random value, never a Teamwork token.
    */
   serviceSecret?: string;
+  /**
+   * INTERNAL-caller auth (Cloudflare worker-to-worker): the fetch function of a service
+   * binding to the teamwork-worker's `InternalTeamwork` named entrypoint, e.g.
+   * `(u, i) => env.TEAMWORK.fetch(u, i)`. A named entrypoint is unreachable from public
+   * HTTP, so the binding itself is the authentication — no secret, no JWT. Only apps
+   * registered `internal: true` in the worker's policy are accepted; all actions run as
+   * the worker's service token. When set, `workerUrl` may be omitted (the binding
+   * ignores the hostname).
+   */
+  bindingFetch?: (url: string, init?: RequestInit) => Promise<Response>;
   /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
   timeoutMs?: number;
 }
@@ -91,6 +101,10 @@ export interface WorkerUpdateTaskInput {
   startAt?: string;
   dueAt?: string;
   tagIds?: number[];
+  /** Replace the task's follower lists — on a shared/bot token this is what stops the
+   * whole team being notified about one person's item. */
+  changeFollowerIds?: number[];
+  commentFollowerIds?: number[];
 }
 
 /** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
@@ -98,6 +112,10 @@ export interface WorkerUpdateTaskInput {
 export interface WorkerUpdateTaskLegacyInput {
   startDate?: string;
   tagIds?: string[];
+  /** v1 board-stage move — workflowId and stageId must travel TOGETHER (a lone stageId
+   * gets a 200 and is silently ignored by Teamwork). */
+  workflowId?: number;
+  stageId?: number;
 }
 
 export interface WorkerListCommentsParams {
@@ -123,21 +141,27 @@ export interface TeamworkWorkerClient {
   completeTask(taskId: string): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   reopenTask(taskId: string): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   listMilestones(projectId: string): Promise<{ milestones: WorkerMilestoneInfo[]; tokenUsed: TeamworkTokenUsed }>;
-  createComment(taskId: string, body: string): Promise<{ tokenUsed: TeamworkTokenUsed }>;
+  /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text. */
+  createComment(taskId: string, body: string, contentType?: "text" | "HTML"): Promise<{ tokenUsed: TeamworkTokenUsed }>;
 }
 
 export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient {
-  const base = opts.workerUrl.replace(/\/$/, "");
+  const rawBase = opts.workerUrl ?? (opts.bindingFetch ? "https://internal" : undefined);
+  if (!rawBase) throw new TeamworkWorkerError(0, "workerUrl is required (unless bindingFetch is provided)");
+  const base = rawBase.replace(/\/$/, "");
   if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
   const timeoutMs = opts.timeoutMs ?? 10_000;
 
-  if (!opts.getJwt && !opts.serviceSecret) {
-    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user callers) or serviceSecret (headless callers)");
+  if (!opts.getJwt && !opts.serviceSecret && !opts.bindingFetch) {
+    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user), serviceSecret (headless), or bindingFetch (worker-to-worker)");
   }
+  const doFetch = opts.bindingFetch ?? fetch;
 
   async function call<T>(method: "GET" | "POST" | "PATCH" | "PUT", path: string, body?: unknown): Promise<T> {
     const auth: Record<string, string> = {};
-    if (opts.serviceSecret) {
+    if (opts.bindingFetch) {
+      /* the binding IS the auth — only the app id travels */
+    } else if (opts.serviceSecret) {
       auth["x-maven-app-secret"] = opts.serviceSecret;
     } else {
       const jwt = await opts.getJwt!();
@@ -147,7 +171,7 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
 
     let res: Response;
     try {
-      res = await fetch(`${base}${path}`, {
+      res = await doFetch(`${base}${path}`, {
         method,
         headers: {
           ...auth,
@@ -198,6 +222,7 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
     completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
     reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
     listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
-    createComment: (taskId, body) => call("POST", `/tasks/${taskId}/comments`, { body }),
+    createComment: (taskId, body, contentType) =>
+      call("POST", `/tasks/${taskId}/comments`, { body, ...(contentType ? { contentType } : {}) }),
   };
 }

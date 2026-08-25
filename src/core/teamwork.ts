@@ -1,5 +1,27 @@
 import type { TeamworkConfig } from "./types";
-import { FeedbackError, messageOf, pushWarning, readBodyText, safeBodyText, snip, type WarningSink } from "./errors";
+import { FeedbackError, messageOf, pushWarning, readBodyText, safeBodyText, snip, type FeedbackStep, type WarningSink } from "./errors";
+import { TeamworkWorkerError, type TeamworkWorkerClient } from "./teamwork-worker-client";
+
+/**
+ * How the feedback core talks to Teamwork:
+ *  - a raw Teamwork token (string) → direct API calls, the original behaviour
+ *  - a TeamworkWorkerClient → every call goes through maven-teamwork-worker (for the
+ *    feedback worker itself: via the InternalTeamwork service binding, zero secrets)
+ * Same four operations, same warning/error semantics either way.
+ */
+export type TeamworkAuth = string | TeamworkWorkerClient;
+
+/** Map a worker-client failure onto the FeedbackError shape the callers expect. */
+function fromWorkerError(step: FeedbackStep, err: unknown, retryable?: boolean): FeedbackError {
+  const httpStatus = err instanceof TeamworkWorkerError && err.status > 0 ? err.status : undefined;
+  return new FeedbackError({
+    step,
+    message: `${step} via teamwork-worker failed: ${messageOf(err)}`,
+    httpStatus,
+    cause: err,
+    ...(retryable !== undefined ? { retryable } : {}),
+  });
+}
 
 function authHeaders(token: string, extra: Record<string, string> = {}): Record<string, string> {
   return { Authorization: `Bearer ${token}`, ...extra };
@@ -35,7 +57,24 @@ function stageFields(cfg: TeamworkConfig): Record<string, number> {
  * The stage is set HERE rather than by a follow-up call, so the task is never
  * briefly stageless and there is no second request to fail silently.
  */
-export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: string, title: string): Promise<string> {
+export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, auth: TeamworkAuth, title: string): Promise<string> {
+  if (typeof auth !== "string") {
+    const stage = stageFields(cfg);
+    try {
+      const { id } = await auth.createTask(cfg.tasklistId, {
+        name: title,
+        assigneeId: cfg.assigneeId,
+        ...("stageId" in stage ? { workflowId: stage.workflowId, stageId: stage.stageId } : {}),
+      });
+      return id;
+    } catch (err) {
+      // "created but no id" arrives as a 502 from the worker — retrying would create
+      // a SECOND task, same contract as the direct path's retryable: false.
+      const noRetry = err instanceof TeamworkWorkerError && err.status === 502 ? false : undefined;
+      throw fromWorkerError("teamwork.createTask", err, noRetry);
+    }
+  }
+  const token = auth;
   let res: Response;
   try {
     res = await fetch(`${cfg.baseUrl}/tasklists/${cfg.tasklistId}/tasks.json`, {
@@ -90,7 +129,16 @@ export async function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: s
 }
 
 /** Post the rich body (text + inline <img>) as an HTML comment on the task. */
-export async function addHtmlComment(cfg: TeamworkConfig, token: string, taskId: string, html: string): Promise<void> {
+export async function addHtmlComment(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, html: string): Promise<void> {
+  if (typeof auth !== "string") {
+    try {
+      await auth.createComment(taskId, html, "HTML");
+      return;
+    } catch (err) {
+      throw fromWorkerError("teamwork.addComment", err);
+    }
+  }
+  const token = auth;
   let res: Response;
   try {
     res = await fetch(`${cfg.baseUrl}/tasks/${taskId}/comments.json`, {
@@ -113,11 +161,17 @@ export async function addHtmlComment(cfg: TeamworkConfig, token: string, taskId:
 }
 
 /** Read a task's current stage id, or null if it can't be determined. */
-async function readStageId(cfg: TeamworkConfig, token: string, taskId: string): Promise<number | null> {
+async function readStageId(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string): Promise<number | null> {
   try {
-    const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, { headers: authHeaders(token) });
-    if (!res.ok) return null;
-    const j = (await res.json()) as { task?: { workflowStages?: Array<{ stageId?: number }> } };
+    let j: { task?: { workflowStages?: Array<{ stageId?: number }> } };
+    if (typeof auth !== "string") {
+      const { body } = await auth.getTask(taskId);
+      j = body as typeof j;
+    } else {
+      const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, { headers: authHeaders(auth) });
+      if (!res.ok) return null;
+      j = (await res.json()) as typeof j;
+    }
     // No `task` at all means the response wasn't what we expected — unverifiable,
     // NOT "stage 0". Reporting the wrong stage on a shape we don't understand would
     // cry wolf on every submission.
@@ -140,27 +194,32 @@ async function readStageId(cfg: TeamworkConfig, token: string, taskId: string): 
  * Pass `warnings` to find out why it returned false. Without a sink the reason is
  * gone — which is how tasks quietly piled up outside To Do (ASAP) for weeks.
  */
-export async function moveTaskToStage(cfg: TeamworkConfig, token: string, taskId: string, warnings?: WarningSink): Promise<boolean> {
+export async function moveTaskToStage(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, warnings?: WarningSink): Promise<boolean> {
   const fields = stageFields(cfg);
   if (!("stageId" in fields)) return false; // no stage configured — nothing to assert
   try {
-    const res = await fetch(`${cfg.baseUrl}/tasks/${taskId}.json`, {
-      method: "PUT",
-      headers: authHeaders(token, { "Content-Type": "application/json" }),
-      // BOTH ids or Teamwork ignores the stage. See stageFields() above.
-      body: JSON.stringify({ "todo-item": fields }),
-    });
-    if (!res.ok) {
-      pushWarning(warnings, {
-        step: "teamwork.moveStage",
-        message: `Task ${taskId} was filed but not moved to stage ${cfg.stageId}: HTTP ${res.status} — ${await safeBodyText(res, 200)}`,
-        httpStatus: res.status,
+    if (typeof auth !== "string") {
+      // BOTH ids or Teamwork ignores the stage — enforced again inside the worker verb.
+      await auth.updateTaskLegacy(taskId, { workflowId: fields.workflowId, stageId: fields.stageId });
+    } else {
+      const res = await fetch(`${cfg.baseUrl}/tasks/${taskId}.json`, {
+        method: "PUT",
+        headers: authHeaders(auth, { "Content-Type": "application/json" }),
+        // BOTH ids or Teamwork ignores the stage. See stageFields() above.
+        body: JSON.stringify({ "todo-item": fields }),
       });
-      return false;
+      if (!res.ok) {
+        pushWarning(warnings, {
+          step: "teamwork.moveStage",
+          message: `Task ${taskId} was filed but not moved to stage ${cfg.stageId}: HTTP ${res.status} — ${await safeBodyText(res, 200)}`,
+          httpStatus: res.status,
+        });
+        return false;
+      }
     }
 
     // Silence is not success — confirm it actually took.
-    const actual = await readStageId(cfg, token, taskId);
+    const actual = await readStageId(cfg, auth, taskId);
     if (actual === null) return true; // couldn't verify; don't cry wolf over a read blip
     if (actual !== fields.stageId) {
       pushWarning(warnings, {
@@ -177,7 +236,24 @@ export async function moveTaskToStage(cfg: TeamworkConfig, token: string, taskId
 }
 
 /** Best-effort: reset followers to ONLY `followerId` (shared-token case). Never throws. */
-export async function setSoleFollower(cfg: TeamworkConfig, token: string, taskId: string, followerId: string, warnings?: WarningSink): Promise<boolean> {
+export async function setSoleFollower(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, followerId: string, warnings?: WarningSink): Promise<boolean> {
+  if (typeof auth !== "string") {
+    try {
+      await auth.updateTask(taskId, {
+        changeFollowerIds: [Number(followerId)],
+        commentFollowerIds: [Number(followerId)],
+      });
+      return true;
+    } catch (err) {
+      pushWarning(warnings, {
+        step: "teamwork.setFollower",
+        message: `Task ${taskId} followers were not reset to ${followerId}: ${messageOf(err)}`,
+        ...(err instanceof TeamworkWorkerError && err.status > 0 ? { httpStatus: err.status } : {}),
+      });
+      return false;
+    }
+  }
+  const token = auth;
   try {
     const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, {
       method: "PATCH",

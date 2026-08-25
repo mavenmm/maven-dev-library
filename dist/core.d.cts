@@ -79,6 +79,188 @@ declare function safeBodyText(res: {
     text(): Promise<string>;
 }, limit?: number): Promise<string>;
 
+type TeamworkTokenUsed = "user" | "service";
+interface TeamworkWorkerClientOptions {
+    /**
+     * The worker origin (e.g. from a TEAMWORK_WORKER_URL env var). Not a secret — the
+     * worker rejects anything without a valid Maven SSO JWT — but deliberately not
+     * hardcoded here either: this library is public, and keeping infrastructure
+     * addresses in each app's own config means a URL change never needs a library
+     * release.
+     */
+    workerUrl?: string;
+    /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
+    appId: string;
+    /**
+     * USER-caller auth: returns the current user's Maven SSO JWT (the raw
+     * `maven_refresh_token` cookie value), or null when there is no session — in which
+     * case calls throw TeamworkWorkerError(401) without hitting the network.
+     * Exactly one of `getJwt` / `serviceSecret` must be provided.
+     */
+    getJwt?: () => string | null | Promise<string | null>;
+    /**
+     * SERVICE-caller auth (crons/webhooks — no user session): the app's per-app secret,
+     * matching the worker's APP_SECRET_<APPID>. All actions run as the worker's service
+     * token, and only apps registered `headless: true` in the worker's policy are
+     * accepted. A random value, never a Teamwork token.
+     */
+    serviceSecret?: string;
+    /**
+     * INTERNAL-caller auth (Cloudflare worker-to-worker): the fetch function of a service
+     * binding to the teamwork-worker's `InternalTeamwork` named entrypoint, e.g.
+     * `(u, i) => env.TEAMWORK.fetch(u, i)`. A named entrypoint is unreachable from public
+     * HTTP, so the binding itself is the authentication — no secret, no JWT. Only apps
+     * registered `internal: true` in the worker's policy are accepted; all actions run as
+     * the worker's service token. When set, `workerUrl` may be omitted (the binding
+     * ignores the hostname).
+     */
+    bindingFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+    /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
+    timeoutMs?: number;
+}
+interface WorkerTasklistInfo {
+    id: string;
+    name: string;
+}
+interface WorkerMilestoneInfo {
+    name: string;
+    /** ISO completion date when the milestone is completed; null otherwise. */
+    completedOn: string | null;
+}
+interface WorkerCreateTaskInput {
+    name: string;
+    /** Teamwork renders a description URL as a real link; a task NAME never is. */
+    description?: string;
+    /** Teamwork user id (in Maven apps, User.id IS the Teamwork user id). */
+    assigneeId?: string;
+    /** "top" reorders the new task to the top of its tasklist (best-effort). */
+    position?: "top";
+}
+declare class TeamworkWorkerError extends Error {
+    status: number;
+    constructor(status: number, message: string);
+}
+/** Allowlisted v3 task-list filters (unknown params are dropped by the worker, never forwarded). */
+interface WorkerListTasksParams {
+    tagIds?: string;
+    projectIds?: string;
+    pageSize?: number;
+    page?: number;
+    include?: string;
+    includeCompletedTasks?: boolean;
+}
+/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
+interface WorkerUpdateTaskInput {
+    startAt?: string;
+    dueAt?: string;
+    tagIds?: number[];
+    /** Replace the task's follower lists — on a shared/bot token this is what stops the
+     * whole team being notified about one person's item. */
+    changeFollowerIds?: number[];
+    commentFollowerIds?: number[];
+}
+/** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
+ * handling is unverified). */
+interface WorkerUpdateTaskLegacyInput {
+    startDate?: string;
+    tagIds?: string[];
+    /** v1 board-stage move — workflowId and stageId must travel TOGETHER (a lone stageId
+     * gets a 200 and is silently ignored by Teamwork). */
+    workflowId?: number;
+    stageId?: number;
+}
+interface WorkerListCommentsParams {
+    pageSize?: number;
+    orderBy?: string;
+    orderMode?: "asc" | "desc";
+}
+interface TeamworkWorkerClient {
+    /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
+    listTasks(params: WorkerListTasksParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** Raw Teamwork v3 single-task response under `body`. */
+    getTask(taskId: string): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    updateTask(taskId: string, input: WorkerUpdateTaskInput): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    updateTaskLegacy(taskId: string, input: WorkerUpdateTaskLegacyInput): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    listComments(taskId: string, params?: WorkerListCommentsParams): Promise<{
+        body: unknown;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** All tasklists in a project, INCLUDING completed ones (a completed list is still THE list for a job). */
+    listTasklists(projectId: string): Promise<{
+        tasklists: WorkerTasklistInfo[];
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    createTasklist(projectId: string, name: string): Promise<{
+        id: string;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** No due-date support, deliberately: Teamwork defaults a due date to a random 2021 date (long-standing bug). */
+    createTask(tasklistId: string, input: WorkerCreateTaskInput): Promise<{
+        id: string;
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** Complete-never-delete: completing is reversible (reopenTask) and keeps the Teamwork audit trail. */
+    completeTask(taskId: string): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    reopenTask(taskId: string): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    listMilestones(projectId: string): Promise<{
+        milestones: WorkerMilestoneInfo[];
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+    /** contentType "HTML" for rich bodies (inline <img> etc.); default plain text. */
+    createComment(taskId: string, body: string, contentType?: "text" | "HTML"): Promise<{
+        tokenUsed: TeamworkTokenUsed;
+    }>;
+}
+declare function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient;
+
+/**
+ * How the feedback core talks to Teamwork:
+ *  - a raw Teamwork token (string) → direct API calls, the original behaviour
+ *  - a TeamworkWorkerClient → every call goes through maven-teamwork-worker (for the
+ *    feedback worker itself: via the InternalTeamwork service binding, zero secrets)
+ * Same four operations, same warning/error semantics either way.
+ */
+type TeamworkAuth = string | TeamworkWorkerClient;
+declare function teamworkTaskUrl(cfg: TeamworkConfig, taskId: string): string;
+/**
+ * Create the feedback task (title + assignee + board stage). Body goes in the
+ * first comment, not here.
+ *
+ * The stage is set HERE rather than by a follow-up call, so the task is never
+ * briefly stageless and there is no second request to fail silently.
+ */
+declare function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, auth: TeamworkAuth, title: string): Promise<string>;
+/** Post the rich body (text + inline <img>) as an HTML comment on the task. */
+declare function addHtmlComment(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, html: string): Promise<void>;
+/**
+ * Best-effort: assert the task sits in the configured board stage. Never throws.
+ *
+ * Runs after creation as a safety net — creation already sets the stage, but this
+ * also repairs tasks made by an older client, and is the only path that can tell
+ * you it FAILED. A 200 here is not proof: Teamwork returns 200 while ignoring a
+ * stage it doesn't like, so the result is read back and verified.
+ *
+ * Pass `warnings` to find out why it returned false. Without a sink the reason is
+ * gone — which is how tasks quietly piled up outside To Do (ASAP) for weeks.
+ */
+declare function moveTaskToStage(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, warnings?: WarningSink): Promise<boolean>;
+/** Best-effort: reset followers to ONLY `followerId` (shared-token case). Never throws. */
+declare function setSoleFollower(cfg: TeamworkConfig, auth: TeamworkAuth, taskId: string, followerId: string, warnings?: WarningSink): Promise<boolean>;
+
 type FeedbackType = "bug" | "feature" | "working_well" | "other";
 interface FeedbackTypeOption {
     value: FeedbackType;
@@ -128,7 +310,10 @@ interface FeedbackConfig {
 }
 /** Server-side secrets — NEVER sent to the browser. */
 interface Secrets {
-    teamworkToken: string;
+    /** A raw Teamwork token (direct calls), or a TeamworkWorkerClient — e.g. one built
+     * with `bindingFetch` over a service binding to maven-teamwork-worker, so the caller
+     * holds no Teamwork credential at all. */
+    teamworkToken: TeamworkAuth;
     vimeoToken?: string;
     anthropicKey?: string;
 }
@@ -266,161 +451,6 @@ declare function buildContextHtml(submitter: Submitter, ctx: {
     topicLabel?: string;
 }): string;
 
-declare function teamworkTaskUrl(cfg: TeamworkConfig, taskId: string): string;
-/**
- * Create the feedback task (title + assignee + board stage). Body goes in the
- * first comment, not here.
- *
- * The stage is set HERE rather than by a follow-up call, so the task is never
- * briefly stageless and there is no second request to fail silently.
- */
-declare function createFeedbackTaskInTeamwork(cfg: TeamworkConfig, token: string, title: string): Promise<string>;
-/** Post the rich body (text + inline <img>) as an HTML comment on the task. */
-declare function addHtmlComment(cfg: TeamworkConfig, token: string, taskId: string, html: string): Promise<void>;
-/**
- * Best-effort: assert the task sits in the configured board stage. Never throws.
- *
- * Runs after creation as a safety net — creation already sets the stage, but this
- * also repairs tasks made by an older client, and is the only path that can tell
- * you it FAILED. A 200 here is not proof: Teamwork returns 200 while ignoring a
- * stage it doesn't like, so the result is read back and verified.
- *
- * Pass `warnings` to find out why it returned false. Without a sink the reason is
- * gone — which is how tasks quietly piled up outside To Do (ASAP) for weeks.
- */
-declare function moveTaskToStage(cfg: TeamworkConfig, token: string, taskId: string, warnings?: WarningSink): Promise<boolean>;
-/** Best-effort: reset followers to ONLY `followerId` (shared-token case). Never throws. */
-declare function setSoleFollower(cfg: TeamworkConfig, token: string, taskId: string, followerId: string, warnings?: WarningSink): Promise<boolean>;
-
-type TeamworkTokenUsed = "user" | "service";
-interface TeamworkWorkerClientOptions {
-    /**
-     * The worker origin (e.g. from a TEAMWORK_WORKER_URL env var). Not a secret — the
-     * worker rejects anything without a valid Maven SSO JWT — but deliberately not
-     * hardcoded here either: this library is public, and keeping infrastructure
-     * addresses in each app's own config means a URL change never needs a library
-     * release.
-     */
-    workerUrl: string;
-    /** App id registered in the worker's src/policy.ts (e.g. "copydeck"). */
-    appId: string;
-    /**
-     * USER-caller auth: returns the current user's Maven SSO JWT (the raw
-     * `maven_refresh_token` cookie value), or null when there is no session — in which
-     * case calls throw TeamworkWorkerError(401) without hitting the network.
-     * Exactly one of `getJwt` / `serviceSecret` must be provided.
-     */
-    getJwt?: () => string | null | Promise<string | null>;
-    /**
-     * SERVICE-caller auth (crons/webhooks — no user session): the app's per-app secret,
-     * matching the worker's APP_SECRET_<APPID>. All actions run as the worker's service
-     * token, and only apps registered `headless: true` in the worker's policy are
-     * accepted. A random value, never a Teamwork token.
-     */
-    serviceSecret?: string;
-    /** Per-request timeout. Default 10s (the worker itself allows 8s per Teamwork call). */
-    timeoutMs?: number;
-}
-interface WorkerTasklistInfo {
-    id: string;
-    name: string;
-}
-interface WorkerMilestoneInfo {
-    name: string;
-    /** ISO completion date when the milestone is completed; null otherwise. */
-    completedOn: string | null;
-}
-interface WorkerCreateTaskInput {
-    name: string;
-    /** Teamwork renders a description URL as a real link; a task NAME never is. */
-    description?: string;
-    /** Teamwork user id (in Maven apps, User.id IS the Teamwork user id). */
-    assigneeId?: string;
-    /** "top" reorders the new task to the top of its tasklist (best-effort). */
-    position?: "top";
-}
-declare class TeamworkWorkerError extends Error {
-    status: number;
-    constructor(status: number, message: string);
-}
-/** Allowlisted v3 task-list filters (unknown params are dropped by the worker, never forwarded). */
-interface WorkerListTasksParams {
-    tagIds?: string;
-    projectIds?: string;
-    pageSize?: number;
-    page?: number;
-    include?: string;
-    includeCompletedTasks?: boolean;
-}
-/** v3 PATCH field subset ({ Task: { startAt, dueAt, tagIds } }). At least one field required. */
-interface WorkerUpdateTaskInput {
-    startAt?: string;
-    dueAt?: string;
-    tagIds?: number[];
-}
-/** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
- * handling is unverified). */
-interface WorkerUpdateTaskLegacyInput {
-    startDate?: string;
-    tagIds?: string[];
-}
-interface WorkerListCommentsParams {
-    pageSize?: number;
-    orderBy?: string;
-    orderMode?: "asc" | "desc";
-}
-interface TeamworkWorkerClient {
-    /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
-    listTasks(params: WorkerListTasksParams): Promise<{
-        body: unknown;
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    /** Raw Teamwork v3 single-task response under `body`. */
-    getTask(taskId: string): Promise<{
-        body: unknown;
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    updateTask(taskId: string, input: WorkerUpdateTaskInput): Promise<{
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    updateTaskLegacy(taskId: string, input: WorkerUpdateTaskLegacyInput): Promise<{
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    listComments(taskId: string, params?: WorkerListCommentsParams): Promise<{
-        body: unknown;
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    /** All tasklists in a project, INCLUDING completed ones (a completed list is still THE list for a job). */
-    listTasklists(projectId: string): Promise<{
-        tasklists: WorkerTasklistInfo[];
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    createTasklist(projectId: string, name: string): Promise<{
-        id: string;
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    /** No due-date support, deliberately: Teamwork defaults a due date to a random 2021 date (long-standing bug). */
-    createTask(tasklistId: string, input: WorkerCreateTaskInput): Promise<{
-        id: string;
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    /** Complete-never-delete: completing is reversible (reopenTask) and keeps the Teamwork audit trail. */
-    completeTask(taskId: string): Promise<{
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    reopenTask(taskId: string): Promise<{
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    listMilestones(projectId: string): Promise<{
-        milestones: WorkerMilestoneInfo[];
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-    createComment(taskId: string, body: string): Promise<{
-        tokenUsed: TeamworkTokenUsed;
-    }>;
-}
-declare function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient;
-
 /**
  * File a text+screenshot feedback task: create task → post body as first comment
  * → best-effort move to stage → (shared-token apps) reset followers.
@@ -520,4 +550,4 @@ declare function summarizePendingVideo(cfg: FeedbackConfig, secrets: Secrets, pe
 
 declare const CORE_VERSION = "0.3.0";
 
-export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };
+export { CORE_VERSION, type CreateFeedbackResult, type CreateTextFeedbackInput, FEEDBACK_TYPES, type FeedbackConfig, FeedbackError, type FeedbackStep, type FeedbackType, type FeedbackTypeOption, type FeedbackWarning, type PendingVideo, type Secrets, type SubmitVideoInput, type SubmitVideoResult, type Submitter, type SummaryOutcome, TRANSCRIPT_MAX_CHARS, type TeamworkAuth, type TeamworkConfig, type TeamworkTokenUsed, type TeamworkWorkerClient, type TeamworkWorkerClientOptions, TeamworkWorkerError, type TranscriptHtmlOptions, type TranscriptResult, type VideoUploadTarget, type VimeoConfig, type WarningSink, type WorkerCreateTaskInput, type WorkerListCommentsParams, type WorkerListTasksParams, type WorkerMilestoneInfo, type WorkerTasklistInfo, type WorkerUpdateTaskInput, type WorkerUpdateTaskLegacyInput, addHtmlComment, buildContextHtml, buildTitle, createFeedbackTaskInTeamwork, createTeamworkWorkerClient, createTextFeedback, createVideoTarget, createVimeoUpload, easternDatePrefix, escapeHtml, fetchTranscript, fetchTranscriptResult, fetchVideoFrames, isFeedbackError, isPermanentHttpStatus, messageOf, moveTaskToStage, moveVideoToFolder, pushWarning, readBodyText, safeBodyText, setSoleFollower, snip, submitVideoFeedback, summarizePendingVideo, summarizeTranscript, teamworkTaskUrl, titlePrefixFor, transcriptToHtml, vimeoWatchUrl, vttToText };

@@ -120,7 +120,95 @@ function buildContextHtml(submitter, ctx) {
   return `<hr/><p>${lines.join("<br/>")}</p>`;
 }
 
+// src/core/teamwork-worker-client.ts
+var TeamworkWorkerError = class extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+    this.name = "TeamworkWorkerError";
+  }
+};
+function createTeamworkWorkerClient(opts) {
+  const rawBase = opts.workerUrl ?? (opts.bindingFetch ? "https://internal" : void 0);
+  if (!rawBase) throw new TeamworkWorkerError(0, "workerUrl is required (unless bindingFetch is provided)");
+  const base = rawBase.replace(/\/$/, "");
+  if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
+  const timeoutMs = opts.timeoutMs ?? 1e4;
+  if (!opts.getJwt && !opts.serviceSecret && !opts.bindingFetch) {
+    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user), serviceSecret (headless), or bindingFetch (worker-to-worker)");
+  }
+  const doFetch = opts.bindingFetch ?? fetch;
+  async function call(method, path, body) {
+    const auth = {};
+    if (opts.bindingFetch) {
+    } else if (opts.serviceSecret) {
+      auth["x-maven-app-secret"] = opts.serviceSecret;
+    } else {
+      const jwt = await opts.getJwt();
+      if (!jwt) throw new TeamworkWorkerError(401, "No Maven session \u2014 cannot call the Teamwork worker");
+      auth["Authorization"] = `Bearer ${jwt}`;
+    }
+    let res;
+    try {
+      res = await doFetch(`${base}${path}`, {
+        method,
+        headers: {
+          ...auth,
+          "x-maven-app-id": opts.appId,
+          ...body !== void 0 ? { "Content-Type": "application/json" } : {}
+        },
+        ...body !== void 0 ? { body: JSON.stringify(body) } : {},
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (err) {
+      throw new TeamworkWorkerError(0, `Teamwork worker unreachable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    let json = null;
+    try {
+      json = await res.json();
+    } catch {
+    }
+    if (!res.ok) {
+      const msg = json && typeof json === "object" && typeof json.error === "string" ? json.error : `Teamwork worker HTTP ${res.status}`;
+      throw new TeamworkWorkerError(res.status, msg);
+    }
+    return json;
+  }
+  const qs = (params) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== void 0 && v !== null && v !== false) q.set(k, String(v));
+    }
+    const s = q.toString();
+    return s ? `?${s}` : "";
+  };
+  return {
+    listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
+    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
+    updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
+    updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
+    listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
+    listTasklists: (projectId) => call("GET", `/projects/${projectId}/tasklists`),
+    createTasklist: (projectId, name) => call("POST", `/projects/${projectId}/tasklists`, { name }),
+    createTask: (tasklistId, input) => call("POST", `/tasklists/${tasklistId}/tasks`, input),
+    completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
+    reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
+    listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
+    createComment: (taskId, body, contentType) => call("POST", `/tasks/${taskId}/comments`, { body, ...contentType ? { contentType } : {} })
+  };
+}
+
 // src/core/teamwork.ts
+function fromWorkerError(step, err, retryable) {
+  const httpStatus = err instanceof TeamworkWorkerError && err.status > 0 ? err.status : void 0;
+  return new FeedbackError({
+    step,
+    message: `${step} via teamwork-worker failed: ${messageOf(err)}`,
+    httpStatus,
+    cause: err,
+    ...retryable !== void 0 ? { retryable } : {}
+  });
+}
 function authHeaders(token, extra = {}) {
   return { Authorization: `Bearer ${token}`, ...extra };
 }
@@ -133,7 +221,22 @@ function stageFields(cfg) {
   if (!Number.isFinite(workflowId) || !Number.isFinite(stageId) || workflowId <= 0 || stageId <= 0) return {};
   return { workflowId, stageId };
 }
-async function createFeedbackTaskInTeamwork(cfg, token, title) {
+async function createFeedbackTaskInTeamwork(cfg, auth, title) {
+  if (typeof auth !== "string") {
+    const stage = stageFields(cfg);
+    try {
+      const { id } = await auth.createTask(cfg.tasklistId, {
+        name: title,
+        assigneeId: cfg.assigneeId,
+        ..."stageId" in stage ? { workflowId: stage.workflowId, stageId: stage.stageId } : {}
+      });
+      return id;
+    } catch (err) {
+      const noRetry = err instanceof TeamworkWorkerError && err.status === 502 ? false : void 0;
+      throw fromWorkerError("teamwork.createTask", err, noRetry);
+    }
+  }
+  const token = auth;
   let res;
   try {
     res = await fetch(`${cfg.baseUrl}/tasklists/${cfg.tasklistId}/tasks.json`, {
@@ -182,7 +285,16 @@ async function createFeedbackTaskInTeamwork(cfg, token, title) {
   }
   return taskId;
 }
-async function addHtmlComment(cfg, token, taskId, html) {
+async function addHtmlComment(cfg, auth, taskId, html) {
+  if (typeof auth !== "string") {
+    try {
+      await auth.createComment(taskId, html, "HTML");
+      return;
+    } catch (err) {
+      throw fromWorkerError("teamwork.addComment", err);
+    }
+  }
+  const token = auth;
   let res;
   try {
     res = await fetch(`${cfg.baseUrl}/tasks/${taskId}/comments.json`, {
@@ -203,11 +315,17 @@ async function addHtmlComment(cfg, token, taskId, html) {
     });
   }
 }
-async function readStageId(cfg, token, taskId) {
+async function readStageId(cfg, auth, taskId) {
   try {
-    const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, { headers: authHeaders(token) });
-    if (!res.ok) return null;
-    const j = await res.json();
+    let j;
+    if (typeof auth !== "string") {
+      const { body } = await auth.getTask(taskId);
+      j = body;
+    } else {
+      const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, { headers: authHeaders(auth) });
+      if (!res.ok) return null;
+      j = await res.json();
+    }
     if (!j || typeof j.task !== "object" || j.task === null) return null;
     const stages = j.task.workflowStages ?? [];
     return stages.length ? Number(stages[0]?.stageId ?? 0) : 0;
@@ -215,25 +333,29 @@ async function readStageId(cfg, token, taskId) {
     return null;
   }
 }
-async function moveTaskToStage(cfg, token, taskId, warnings) {
+async function moveTaskToStage(cfg, auth, taskId, warnings) {
   const fields = stageFields(cfg);
   if (!("stageId" in fields)) return false;
   try {
-    const res = await fetch(`${cfg.baseUrl}/tasks/${taskId}.json`, {
-      method: "PUT",
-      headers: authHeaders(token, { "Content-Type": "application/json" }),
-      // BOTH ids or Teamwork ignores the stage. See stageFields() above.
-      body: JSON.stringify({ "todo-item": fields })
-    });
-    if (!res.ok) {
-      pushWarning(warnings, {
-        step: "teamwork.moveStage",
-        message: `Task ${taskId} was filed but not moved to stage ${cfg.stageId}: HTTP ${res.status} \u2014 ${await safeBodyText(res, 200)}`,
-        httpStatus: res.status
+    if (typeof auth !== "string") {
+      await auth.updateTaskLegacy(taskId, { workflowId: fields.workflowId, stageId: fields.stageId });
+    } else {
+      const res = await fetch(`${cfg.baseUrl}/tasks/${taskId}.json`, {
+        method: "PUT",
+        headers: authHeaders(auth, { "Content-Type": "application/json" }),
+        // BOTH ids or Teamwork ignores the stage. See stageFields() above.
+        body: JSON.stringify({ "todo-item": fields })
       });
-      return false;
+      if (!res.ok) {
+        pushWarning(warnings, {
+          step: "teamwork.moveStage",
+          message: `Task ${taskId} was filed but not moved to stage ${cfg.stageId}: HTTP ${res.status} \u2014 ${await safeBodyText(res, 200)}`,
+          httpStatus: res.status
+        });
+        return false;
+      }
     }
-    const actual = await readStageId(cfg, token, taskId);
+    const actual = await readStageId(cfg, auth, taskId);
     if (actual === null) return true;
     if (actual !== fields.stageId) {
       pushWarning(warnings, {
@@ -248,7 +370,24 @@ async function moveTaskToStage(cfg, token, taskId, warnings) {
     return false;
   }
 }
-async function setSoleFollower(cfg, token, taskId, followerId, warnings) {
+async function setSoleFollower(cfg, auth, taskId, followerId, warnings) {
+  if (typeof auth !== "string") {
+    try {
+      await auth.updateTask(taskId, {
+        changeFollowerIds: [Number(followerId)],
+        commentFollowerIds: [Number(followerId)]
+      });
+      return true;
+    } catch (err) {
+      pushWarning(warnings, {
+        step: "teamwork.setFollower",
+        message: `Task ${taskId} followers were not reset to ${followerId}: ${messageOf(err)}`,
+        ...err instanceof TeamworkWorkerError && err.status > 0 ? { httpStatus: err.status } : {}
+      });
+      return false;
+    }
+  }
+  const token = auth;
   try {
     const res = await fetch(`${cfg.baseUrl}/projects/api/v3/tasks/${taskId}.json`, {
       method: "PATCH",
@@ -269,80 +408,6 @@ async function setSoleFollower(cfg, token, taskId, followerId, warnings) {
     pushWarning(warnings, { step: "teamwork.setFollower", message: `Task ${taskId} follower reset could not reach the API: ${messageOf(err)}` });
     return false;
   }
-}
-
-// src/core/teamwork-worker-client.ts
-var TeamworkWorkerError = class extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-    this.name = "TeamworkWorkerError";
-  }
-};
-function createTeamworkWorkerClient(opts) {
-  const base = opts.workerUrl.replace(/\/$/, "");
-  if (!/^https:\/\//.test(base)) throw new TeamworkWorkerError(0, "workerUrl must be an https:// origin");
-  const timeoutMs = opts.timeoutMs ?? 1e4;
-  if (!opts.getJwt && !opts.serviceSecret) {
-    throw new TeamworkWorkerError(0, "createTeamworkWorkerClient needs getJwt (user callers) or serviceSecret (headless callers)");
-  }
-  async function call(method, path, body) {
-    const auth = {};
-    if (opts.serviceSecret) {
-      auth["x-maven-app-secret"] = opts.serviceSecret;
-    } else {
-      const jwt = await opts.getJwt();
-      if (!jwt) throw new TeamworkWorkerError(401, "No Maven session \u2014 cannot call the Teamwork worker");
-      auth["Authorization"] = `Bearer ${jwt}`;
-    }
-    let res;
-    try {
-      res = await fetch(`${base}${path}`, {
-        method,
-        headers: {
-          ...auth,
-          "x-maven-app-id": opts.appId,
-          ...body !== void 0 ? { "Content-Type": "application/json" } : {}
-        },
-        ...body !== void 0 ? { body: JSON.stringify(body) } : {},
-        signal: AbortSignal.timeout(timeoutMs)
-      });
-    } catch (err) {
-      throw new TeamworkWorkerError(0, `Teamwork worker unreachable: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    let json = null;
-    try {
-      json = await res.json();
-    } catch {
-    }
-    if (!res.ok) {
-      const msg = json && typeof json === "object" && typeof json.error === "string" ? json.error : `Teamwork worker HTTP ${res.status}`;
-      throw new TeamworkWorkerError(res.status, msg);
-    }
-    return json;
-  }
-  const qs = (params) => {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(params)) {
-      if (v !== void 0 && v !== null && v !== false) q.set(k, String(v));
-    }
-    const s = q.toString();
-    return s ? `?${s}` : "";
-  };
-  return {
-    listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
-    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
-    updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
-    updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
-    listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
-    listTasklists: (projectId) => call("GET", `/projects/${projectId}/tasklists`),
-    createTasklist: (projectId, name) => call("POST", `/projects/${projectId}/tasklists`, { name }),
-    createTask: (tasklistId, input) => call("POST", `/tasklists/${tasklistId}/tasks`, input),
-    completeTask: (taskId) => call("POST", `/tasks/${taskId}/complete`),
-    reopenTask: (taskId) => call("POST", `/tasks/${taskId}/uncomplete`),
-    listMilestones: (projectId) => call("GET", `/projects/${projectId}/milestones`),
-    createComment: (taskId, body) => call("POST", `/tasks/${taskId}/comments`, { body })
-  };
 }
 
 // src/core/create-text-feedback.ts
