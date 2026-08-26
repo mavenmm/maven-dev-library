@@ -186,7 +186,10 @@ function createTeamworkWorkerClient(opts) {
   };
   return {
     listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
-    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
+    getTask: (taskId, include) => call("GET", `/tasks/${taskId}${qs({ include })}`),
+    getTaskLegacy: (taskId) => call("GET", `/tasks/${taskId}?legacy=true`),
+    listSubtasks: (taskId, params = {}) => call("GET", `/tasks/${taskId}/subtasks${qs({ ...params })}`),
+    createSubtask: (parentTaskId, input) => call("POST", `/tasks/${parentTaskId}/subtasks`, input),
     updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
     updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
     listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
@@ -202,7 +205,11 @@ function createTeamworkWorkerClient(opts) {
       body,
       ...contentType ? { contentType } : {},
       ...notifyUserIds && notifyUserIds.length > 0 ? { notifyUserIds } : {}
-    })
+    }),
+    getMe: () => call("GET", `/me`),
+    listProjectPeople: (projectId, pageSize) => call("GET", `/projects/${projectId}/people${qs({ pageSize })}`),
+    listWorkflowStages: (workflowId) => call("GET", `/workflows/${workflowId}/stages`),
+    listProofs: (params = {}) => call("GET", `/proofs${qs({ ...params })}`)
   };
 }
 

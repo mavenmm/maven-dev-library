@@ -1,23 +1,38 @@
 {
   "name": "@mavenmm/dev-library",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": false,
-  "description": "Maven's private shared dev-component library (SSOT). Consumed by Maven apps via git dependency — never published. Subpaths: /core (backend logic), /ui (React components).",
+  "description": "Maven's private shared dev-component library (SSOT). Consumed by Maven apps via git dependency \u2014 never published. Subpaths: /core (backend logic), /ui (React components).",
   "type": "module",
   "exports": {
-    "./core": { "types": "./dist/core.d.ts", "import": "./dist/core.js", "require": "./dist/core.cjs" },
-    "./ui": { "types": "./dist/ui.d.ts", "import": "./dist/ui.js", "require": "./dist/ui.cjs" },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
+    },
+    "./ui": {
+      "types": "./dist/ui.d.ts",
+      "import": "./dist/ui.js",
+      "require": "./dist/ui.cjs"
+    },
     "./ui/styles.css": "./dist/styles.css"
   },
   "//typesVersions": "Subpath type resolution for consumers on classic moduleResolution 'node' (which ignores 'exports'). Complements the exports map above; type-only, no runtime effect.",
   "typesVersions": {
     "*": {
-      "core": ["dist/core.d.ts"],
-      "ui": ["dist/ui.d.ts"]
+      "core": [
+        "dist/core.d.ts"
+      ],
+      "ui": [
+        "dist/ui.d.ts"
+      ]
     }
   },
-  "files": ["dist", "src"],
-  "//scripts": "No `prepare` script — dist/ is COMMITTED and consumers install it prebuilt. A prepare build broke git installs on machines where rollup's native binary fails (e.g. the dashboard droplet). Run `npm run build` and commit dist/ BEFORE tagging a release.",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "//scripts": "No `prepare` script \u2014 dist/ is COMMITTED and consumers install it prebuilt. A prepare build broke git installs on machines where rollup's native binary fails (e.g. the dashboard droplet). Run `npm run build` and commit dist/ BEFORE tagging a release.",
   "scripts": {
     "build": "tsup && cp src/ui/styles.css dist/styles.css",
     "test": "vitest run",
@@ -37,13 +52,27 @@
     "@tiptap/extension-placeholder": "^3"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "react-dom": { "optional": true },
-    "@tiptap/react": { "optional": true },
-    "@tiptap/pm": { "optional": true },
-    "@tiptap/starter-kit": { "optional": true },
-    "@tiptap/extension-image": { "optional": true },
-    "@tiptap/extension-placeholder": { "optional": true }
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "@tiptap/react": {
+      "optional": true
+    },
+    "@tiptap/pm": {
+      "optional": true
+    },
+    "@tiptap/starter-kit": {
+      "optional": true
+    },
+    "@tiptap/extension-image": {
+      "optional": true
+    },
+    "@tiptap/extension-placeholder": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "tsup": "^8.3.0",
@@ -62,7 +91,7 @@
     "@testing-library/dom": "^10.4.0",
     "jsdom": "^25.0.1"
   },
-  "//allowScripts": "npm 12 blocks dependency install scripts unless each one is explicitly approved (true) or denied (false). This map records the decision for every dep that has one. It matters to CONSUMERS, not just to us: npm installs this repo's deps inside the git checkout when an app pulls us in as a git dependency, and a consumer running `strict-allow-scripts` turns an unreviewed script here into a hard install failure on their side (it blocked a status-app Netlify deploy, 2026-08-16). Both entries are safe to deny — esbuild's postinstall only fetches/validates a binary that its @esbuild/<platform> package already delivers as a plain file, and fsevents ships a prebuilt fsevents.node in its tarball, so its node-gyp rebuild is redundant. Deny a new entry unless the package genuinely cannot work without building at install time.",
+  "//allowScripts": "npm 12 blocks dependency install scripts unless each one is explicitly approved (true) or denied (false). This map records the decision for every dep that has one. It matters to CONSUMERS, not just to us: npm installs this repo's deps inside the git checkout when an app pulls us in as a git dependency, and a consumer running `strict-allow-scripts` turns an unreviewed script here into a hard install failure on their side (it blocked a status-app Netlify deploy, 2026-08-16). Both entries are safe to deny \u2014 esbuild's postinstall only fetches/validates a binary that its @esbuild/<platform> package already delivers as a plain file, and fsevents ships a prebuilt fsevents.node in its tarball, so its node-gyp rebuild is redundant. Deny a new entry unless the package genuinely cannot work without building at install time.",
   "allowScripts": {
     "esbuild": false,
     "fsevents": false

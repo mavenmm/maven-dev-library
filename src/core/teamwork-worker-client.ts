@@ -90,9 +90,16 @@ export class TeamworkWorkerError extends Error {
 export interface WorkerListTasksParams {
   tagIds?: string;
   projectIds?: string;
+  /** Filter by assignee (comma-separated Teamwork user ids). The v3 param really is
+   * responsiblePartyIds — assignedToUserIds is silently ignored and returns the whole
+   * account's tasks (verified live 2026-08-05). */
+  responsiblePartyIds?: string;
   pageSize?: number;
   page?: number;
   include?: string;
+  /** e.g. "duedate". Unknown values are silently ignored by Teamwork (HTTP 200). */
+  orderBy?: string;
+  orderMode?: "asc" | "desc";
   includeCompletedTasks?: boolean;
   /** Include tasks from archived/completed projects — excluded by default, and most
    * historical work lives there (live check: one job-type tag went 27 → 87 tasks). */
@@ -113,11 +120,18 @@ export interface WorkerListTimelogsParams {
   endDate?: string;
   pageSize?: number;
   page?: number;
+  /** Sideloads, e.g. "users" (resolves who logged the time). */
+  include?: string;
+  /** e.g. "date". */
+  orderBy?: string;
+  orderMode?: "asc" | "desc";
   includeArchivedProjects?: boolean;
 }
 
 /** v3 PATCH field subset. At least one field required. */
 export interface WorkerUpdateTaskInput {
+  /** Rename the task. */
+  name?: string;
   startAt?: string;
   dueAt?: string;
   tagIds?: number[];
@@ -136,10 +150,11 @@ export interface WorkerUpdateTaskInput {
   stageId?: number;
 }
 
-/** v1 PUT field subset — clearing a start date goes through v1 ("" clears; v3's null
+/** v1 PUT field subset — clearing a date goes through v1 ("" clears; v3's null
  * handling is unverified). */
 export interface WorkerUpdateTaskLegacyInput {
   startDate?: string;
+  dueDate?: string;
   tagIds?: string[];
   /** v1 board-stage move — workflowId and stageId must travel TOGETHER (a lone stageId
    * gets a 200 and is silently ignored by Teamwork). */
@@ -149,8 +164,40 @@ export interface WorkerUpdateTaskLegacyInput {
 
 export interface WorkerListCommentsParams {
   pageSize?: number;
+  /** The only verified sort is "date" — unusually for Teamwork, unknown values 400
+   * loudly here ("unknown comment sort") instead of being silently ignored. */
   orderBy?: string;
   orderMode?: "asc" | "desc";
+  /** Sideloads, e.g. "users" — v3 comments carry only postedByUserId; the users
+   * sideload is how authors resolve to names/avatars. */
+  include?: string;
+}
+
+/** Filters for the dedicated v3 subtasks endpoint (tasks.json?parentTaskIds= is NOT a
+ * v3 param — silently ignored, returns the whole account's tasks). */
+export interface WorkerListSubtasksParams {
+  includeCompletedTasks?: boolean;
+  include?: string;
+  pageSize?: number;
+}
+
+/** v1 subtask create under a parent task (no v3 equivalent). Dates are ISO YYYY-MM-DD;
+ * the worker converts to v1's YYYYMMDD wire format. */
+export interface WorkerCreateSubtaskInput {
+  name: string;
+  /** Full assignee list (Teamwork user ids). */
+  assigneeIds?: number[];
+  startDate?: string;
+  dueDate?: string;
+}
+
+/** Allowlisted v3 proof-list filters. proofs.json has NO task/project filter — fetch
+ * recent and filter by entity.id yourself. Page-size param is `limit`, not pageSize. */
+export interface WorkerListProofsParams {
+  orderBy?: string;
+  orderMode?: "asc" | "desc";
+  include?: string;
+  limit?: number;
 }
 
 /** Allowlisted v3 tag-list filters (e.g. searchTerm "INT_JT_" resolves job-type tags by name). */
@@ -162,8 +209,18 @@ export interface WorkerListTagsParams {
 export interface TeamworkWorkerClient {
   /** Raw Teamwork v3 task-list response under `body` (shape owned by Teamwork; cast at the call site). */
   listTasks(params: WorkerListTasksParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
-  /** Raw Teamwork v3 single-task response under `body`. */
-  getTask(taskId: string): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Raw Teamwork v3 single-task response under `body`. `include` sideloads
+   * (e.g. "projects,projects.categories,tasklists,users,tags") come back keyed by id
+   * under `body.included`. */
+  getTask(taskId: string, include?: string): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Raw v1 single-task read under `body` (`body["todo-item"]`) — exists because v3
+   * doesn't expose follower ids (comment-follower-ids / change-follower-ids). */
+  getTaskLegacy(taskId: string): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Raw v3 subtask-list response under `body` for the children of one task. */
+  listSubtasks(taskId: string, params?: WorkerListSubtasksParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Create a subtask under a parent task (v1 — no v3 equivalent). Unlike
+   * tasklist-scoped createTask, due dates on this path are prod-verified safe. */
+  createSubtask(parentTaskId: string, input: WorkerCreateSubtaskInput): Promise<{ id: string; tokenUsed: TeamworkTokenUsed }>;
   updateTask(taskId: string, input: WorkerUpdateTaskInput): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   updateTaskLegacy(taskId: string, input: WorkerUpdateTaskLegacyInput): Promise<{ tokenUsed: TeamworkTokenUsed }>;
   listComments(taskId: string, params?: WorkerListCommentsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
@@ -189,7 +246,21 @@ export interface TeamworkWorkerClient {
     body: string,
     contentType?: "text" | "HTML",
     notifyUserIds?: number[],
-  ): Promise<{ tokenUsed: TeamworkTokenUsed }>;
+  ): Promise<{ id: string | null; tokenUsed: TeamworkTokenUsed }>;
+  /** The calling user's Teamwork identity — raw v3 me.json under `body`
+   * (`body.person` carries `userType`: "account" | "collaborator" | "contact").
+   * Always runs on the user's own token; meaningless for headless/internal callers. */
+  getMe(): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** People on a project — raw v3 response under `body` (camelCase, no address/PII
+   * fields, unlike v1). */
+  listProjectPeople(projectId: string, pageSize?: number): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Stages (board columns) of a workflow — raw v3 response under `body`. Task objects
+   * carry only {workflowId, stageId}; this resolves names. Backlog is stageId 0 and
+   * never appears here. */
+  listWorkflowStages(workflowId: string): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
+  /** Recent proofs — raw v3 response under `body`. No task filter exists; filter by
+   * `body.proofs[].entity.id` yourself. */
+  listProofs(params?: WorkerListProofsParams): Promise<{ body: unknown; tokenUsed: TeamworkTokenUsed }>;
 }
 
 export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): TeamworkWorkerClient {
@@ -262,7 +333,10 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
 
   return {
     listTasks: (params) => call("GET", `/tasks${qs({ ...params })}`),
-    getTask: (taskId) => call("GET", `/tasks/${taskId}`),
+    getTask: (taskId, include) => call("GET", `/tasks/${taskId}${qs({ include })}`),
+    getTaskLegacy: (taskId) => call("GET", `/tasks/${taskId}?legacy=true`),
+    listSubtasks: (taskId, params = {}) => call("GET", `/tasks/${taskId}/subtasks${qs({ ...params })}`),
+    createSubtask: (parentTaskId, input) => call("POST", `/tasks/${parentTaskId}/subtasks`, input),
     updateTask: (taskId, input) => call("PATCH", `/tasks/${taskId}`, input),
     updateTaskLegacy: (taskId, input) => call("PUT", `/tasks/${taskId}`, input),
     listComments: (taskId, params = {}) => call("GET", `/tasks/${taskId}/comments${qs({ ...params })}`),
@@ -280,5 +354,9 @@ export function createTeamworkWorkerClient(opts: TeamworkWorkerClientOptions): T
         ...(contentType ? { contentType } : {}),
         ...(notifyUserIds && notifyUserIds.length > 0 ? { notifyUserIds } : {}),
       }),
+    getMe: () => call("GET", `/me`),
+    listProjectPeople: (projectId, pageSize) => call("GET", `/projects/${projectId}/people${qs({ pageSize })}`),
+    listWorkflowStages: (workflowId) => call("GET", `/workflows/${workflowId}/stages`),
+    listProofs: (params = {}) => call("GET", `/proofs${qs({ ...params })}`),
   };
 }
